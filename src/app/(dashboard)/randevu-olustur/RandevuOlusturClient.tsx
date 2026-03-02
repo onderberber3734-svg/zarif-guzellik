@@ -1,0 +1,548 @@
+"use client";
+
+import { useState } from "react";
+import { getCategoryStyle } from "@/app/(dashboard)/hizmetler/HizmetlerClient";
+import { createAppointment } from "@/app/actions/appointments";
+
+export default function RandevuOlusturClient({ services, customers }: { services: any[], customers: any[] }) {
+    const [selectedServices, setSelectedServices] = useState<any[]>([]);
+    const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
+    const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
+    const today = new Date();
+    const [selectedDate, setSelectedDate] = useState<number | null>(today.getDate());
+    const [selectedTime, setSelectedTime] = useState<string | null>("10:30");
+    const [isSuccess, setIsSuccess] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    const next7Days = Array.from({ length: 7 }, (_, i) => {
+        const d = new Date();
+        d.setDate(today.getDate() + i);
+        return d;
+    });
+
+    const displayMonthYear = next7Days[0].toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' });
+
+    const handleServiceToggle = (service: any) => {
+        setSelectedServices((prev) => {
+            const isSelected = prev.find(s => s.id === service.id);
+            if (isSelected) {
+                return prev.filter(s => s.id !== service.id);
+            } else {
+                return [...prev, service];
+            }
+        });
+    };
+
+    // Toplam tutar ve süre hesaplaması
+    const totalDuration = selectedServices.reduce((acc, s) => acc + (s.duration_minutes || 0), 0);
+    const subtotal = selectedServices.reduce((acc, s) => acc + (s.price || 0), 0);
+    const taxRate = 0.20; // %20 KDV
+    const taxAmount = subtotal * taxRate;
+    const totalAmount = subtotal + taxAmount;
+
+    // Bitiş saatini hesaplama
+    let endTimeStr = "";
+    if (selectedTime && totalDuration > 0) {
+        const [hours, minutes] = selectedTime.split(":").map(Number);
+        const date = new Date(today.getFullYear(), today.getMonth(), today.getDate(), hours, minutes);
+        date.setMinutes(date.getMinutes() + totalDuration);
+        endTimeStr = `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+    }
+
+    const handleCreateAppointment = async () => {
+        if (!selectedCustomer || selectedServices.length === 0 || !selectedDate || !selectedTime) {
+            alert("Lütfen müşteri, hizmet, tarih ve saati seçtiğinizden emin olun.");
+            return;
+        }
+
+        setIsSubmitting(true);
+        try {
+            // Tarihi formatla (YYYY-MM-DD)
+            const year = today.getFullYear();
+            const month = String(today.getMonth() + 1).padStart(2, '0');
+            const day = String(selectedDate).padStart(2, '0');
+            const appointmentDateStr = `${year}-${month}-${day}`;
+
+            // Backend için hizmetleri formatla
+            const servicesToInsert = selectedServices.map(s => ({
+                service_id: s.id,
+                price_at_booking: Number(s.price)
+            }));
+
+            const res = await createAppointment({
+                customer_id: selectedCustomer.id,
+                appointment_date: appointmentDateStr,
+                appointment_time: selectedTime,
+                total_duration_minutes: totalDuration,
+                total_price: totalAmount,
+                services: servicesToInsert
+            });
+
+            if (res.success) {
+                // Başarı durumunda success ekranını göster
+                setIsSuccess(true);
+                window.scrollTo(0, 0);
+            } else {
+                alert("Randevu oluşturulurken hata: " + res.error);
+            }
+        } catch (error: any) {
+            alert("Randevu oluşturulurken beklenmeyen hata: " + error.message);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    if (isSuccess) {
+        return (
+            <div className="max-w-3xl mx-auto py-12 animate-in fade-in zoom-in duration-500">
+                <div className="text-center mb-10">
+                    <div className="inline-flex items-center justify-center size-24 bg-[var(--color-primary)]/10 rounded-full mb-6 relative">
+                        <div className="size-16 bg-[var(--color-primary)] rounded-full flex items-center justify-center text-white shadow-xl shadow-[var(--color-primary)]/30 absolute">
+                            <span className="material-symbols-outlined text-4xl font-bold">check</span>
+                        </div>
+                    </div>
+                    <h1 className="text-4xl font-bold text-slate-900 mb-2">Randevu Başarıyla Oluşturuldu!</h1>
+                    <p className="text-slate-500 font-medium">Müşteriye onay bildirimi gönderildi.</p>
+                </div>
+
+                <div className="bg-white rounded-3xl border border-slate-200 shadow-xl overflow-hidden mb-8">
+                    <div className="p-8">
+                        <div className="flex items-center gap-6 pb-8 border-b border-slate-100">
+                            <div className="size-16 rounded-full bg-slate-200 flex items-center justify-center text-slate-400 ring-4 ring-purple-50">
+                                <span className="material-symbols-outlined text-3xl">person</span>
+                            </div>
+                            <div>
+                                <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mb-1">Müşteri</p>
+                                <h4 className="text-2xl font-bold text-slate-900">{selectedCustomer?.first_name} {selectedCustomer?.last_name}</h4>
+                                <p className="text-sm text-slate-500">{selectedCustomer?.phone}</p>
+                            </div>
+                        </div>
+
+                        <div className="py-8 grid grid-cols-1 md:grid-cols-2 gap-8 border-b border-slate-100">
+                            <div className="space-y-4">
+                                <div>
+                                    <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mb-4">Hizmetler</p>
+                                    <div className="space-y-3">
+                                        {selectedServices.map(s => (
+                                            <div key={s.id} className="flex items-center gap-3">
+                                                <span className={`w-1.5 h-6 rounded-full ${getCategoryStyle(s.category).split(' ')[0]}`}></span>
+                                                <p className="text-sm font-bold text-slate-700">{s.name}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="space-y-4">
+                                <div>
+                                    <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mb-4">Tarih & Saat</p>
+                                    <div className="flex flex-col gap-3">
+                                        <div className="flex items-center gap-3">
+                                            <span className="material-symbols-outlined text-[var(--color-primary)] text-lg">calendar_today</span>
+                                            <p className="text-sm font-bold">{selectedDate} {displayMonthYear.split(' ')[0]}</p>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <span className="material-symbols-outlined text-[var(--color-primary)] text-lg">schedule</span>
+                                            <p className="text-sm font-bold text-[var(--color-primary)]">{selectedTime} {endTimeStr && `- ${endTimeStr}`}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="pt-8 flex justify-between items-center">
+                            <div className="flex items-center gap-2 text-[var(--color-primary)] font-bold">
+                                <span className="material-symbols-outlined text-xl">payments</span>
+                                <span className="text-lg">Toplam Tutar:</span>
+                            </div>
+                            <span className="text-3xl font-bold text-[var(--color-primary)]">₺{totalAmount.toFixed(2)}</span>
+                        </div>
+                    </div>
+
+                    <div className="bg-slate-50 p-4 border-t border-slate-100 flex items-center justify-center gap-3">
+                        <span className="material-symbols-outlined text-[var(--color-primary)]">auto_awesome</span>
+                        <p className="text-xs text-slate-600">
+                            <b className="text-[var(--color-primary)] font-bold">AI Notu:</b> Bu randevu için özel fiyatlandırma uygulandı ve sisteme işlendi.
+                        </p>
+                    </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-4">
+                    <button onClick={() => window.location.href = "/"} className="flex-1 bg-[var(--color-primary)] text-white py-4 rounded-2xl font-bold shadow-lg shadow-[var(--color-primary)]/20 hover:opacity-90 transition-all flex items-center justify-center gap-2">
+                        <span className="material-symbols-outlined">home</span>
+                        Ana Panele Dön
+                    </button>
+                    <button onClick={() => { setIsSuccess(false); setSelectedServices([]); }} className="flex-1 bg-white text-slate-600 py-4 rounded-2xl font-bold border border-slate-200 hover:bg-slate-50 transition-all flex items-center justify-center gap-2">
+                        <span className="material-symbols-outlined text-lg">add</span>
+                        Yeni Randevu Oluştur
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-8 max-w-7xl mx-auto">
+            <div className="flex items-center justify-between">
+                <div>
+                    <h2 className="text-3xl font-bold">Yeni Randevu Oluştur</h2>
+                    <p className="text-slate-500 mt-2">Müşteri, hizmet ve zaman bilgilerini belirleyin.</p>
+                </div>
+                <div className="flex items-center gap-2 text-sm font-medium text-slate-500 bg-white px-4 py-2 border border-slate-100 rounded-xl shadow-sm">
+                    <span className="material-symbols-outlined text-[var(--color-primary)]">auto_awesome</span>
+                    AI Önerileri Açık
+                </div>
+            </div>
+
+            <div className="flex items-center justify-between border-b border-slate-200 mb-8 px-4">
+                <div className="flex gap-12">
+                    <button className="pb-4 text-slate-400 font-medium border-b-2 border-transparent flex items-center gap-2">
+                        <span className="size-6 bg-slate-200 text-slate-500 rounded-full text-xs flex items-center justify-center">1</span>
+                        Müşteri Seçimi
+                    </button>
+                    <button className="pb-4 text-[var(--color-primary)] font-bold border-b-2 border-[var(--color-primary)] flex items-center gap-2">
+                        <span className="size-6 bg-[var(--color-primary)] text-white rounded-full text-xs flex items-center justify-center">2</span>
+                        Hizmet Seçimi
+                    </button>
+                    <button className="pb-4 text-slate-400 font-medium border-b-2 border-transparent flex items-center gap-2">
+                        <span className="size-6 bg-slate-200 text-slate-500 rounded-full text-xs flex items-center justify-center">3</span>
+                        Tarih & Saat
+                    </button>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                <div className="lg:col-span-8 space-y-8">
+                    {/* Müşteri Seçimi */}
+                    <section className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-lg font-bold">Müşteri</h3>
+                            <button
+                                onClick={() => setIsCustomerModalOpen(true)}
+                                className="text-[var(--color-primary)] text-sm font-bold"
+                            >
+                                {selectedCustomer ? "Değiştir" : "Müşteri Seç"}
+                            </button>
+                        </div>
+
+                        {selectedCustomer ? (
+                            <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                                <div className="size-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-400">
+                                    <span className="material-symbols-outlined">person</span>
+                                </div>
+                                <div>
+                                    <p className="text-sm font-bold">{selectedCustomer.first_name} {selectedCustomer.last_name}</p>
+                                    <p className="text-xs text-slate-500">{selectedCustomer.phone}</p>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="flex items-center justify-center gap-3 p-6 bg-slate-50 rounded-2xl border border-slate-100 border-dashed cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => setIsCustomerModalOpen(true)}>
+                                <span className="material-symbols-outlined text-slate-400">person_add</span>
+                                <p className="text-sm font-bold text-slate-500">Randevu için bir müşteri seçin</p>
+                            </div>
+                        )}
+                    </section>
+
+                    {/* Hizmet Seçimi (DİNAMİK) */}
+                    <section className="space-y-6">
+                        <div className="flex items-center justify-between flex-wrap gap-4">
+                            <h3 className="text-xl font-bold">Hizmet Seçimi</h3>
+                            <div className="flex items-center gap-3">
+                                <div className="flex gap-2">
+                                    <span className="text-xs text-slate-400">Veritabanından çekiliyor</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {services.length === 0 ? (
+                            <div className="bg-white border border-slate-200 p-8 rounded-3xl text-center">
+                                <span className="material-symbols-outlined text-4xl text-slate-300 mb-2">inventory_2</span>
+                                <p className="text-slate-500">İşletmenize ait hiç hizmet bulunamadı. Lütfen önce Hizmetler sayfasından hizmet ekleyin.</p>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {services.map((service) => {
+                                    const isSelected = selectedServices.some(s => s.id === service.id);
+
+                                    return (
+                                        <div
+                                            key={service.id}
+                                            onClick={() => handleServiceToggle(service)}
+                                            className={`bg-white border-2 p-5 rounded-3xl relative shadow-sm cursor-pointer transition-all ${isSelected ? 'border-[var(--color-primary)]' : 'border-slate-200 hover:border-[var(--color-primary)]/50'
+                                                }`}
+                                        >
+                                            <div className="flex justify-between items-start mb-4">
+                                                <div className={`p-2 rounded-xl flex items-center justify-center ${getCategoryStyle(service.category)}`}>
+                                                    <span className="material-symbols-outlined">{service.icon || 'auto_awesome'}</span>
+                                                </div>
+                                                <div className="text-right">
+                                                    <div className="flex items-center justify-end gap-1">
+                                                        <span className="text-lg font-bold text-slate-900">₺{service.price}</span>
+                                                    </div>
+                                                    <p className="text-xs text-slate-400">{service.duration_minutes} dk</p>
+                                                </div>
+                                            </div>
+                                            <h4 className="font-bold mb-1 text-slate-900">{service.name}</h4>
+                                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">{service.category}</p>
+                                            <p className="text-sm text-slate-500 mb-4 line-clamp-2">{service.description}</p>
+
+                                            {isSelected && (
+                                                <div className="absolute -top-2 -right-2 bg-[var(--color-primary)] text-white size-6 rounded-full flex items-center justify-center shadow-lg">
+                                                    <span className="material-symbols-outlined text-sm">check</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </section>
+
+                    {/* Tarih ve Saat */}
+                    <section className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm">
+                        <div className="flex items-center justify-between mb-6">
+                            <h3 className="text-xl font-bold text-slate-900">Tarih & Saat</h3>
+                            <div className="flex items-center gap-2 bg-[var(--color-primary)]/10 text-[var(--color-primary)] px-3 py-1.5 rounded-xl text-xs font-bold">
+                                <span className="material-symbols-outlined text-sm">auto_awesome</span>
+                                Verimli Saatler Öne Çıkarıldı
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div className="space-y-4">
+                                <div className="flex items-center justify-between mb-2">
+                                    <p className="font-bold">{displayMonthYear}</p>
+                                    <div className="flex gap-2">
+                                        <button className="p-1 rounded-lg hover:bg-slate-100"><span className="material-symbols-outlined">chevron_left</span></button>
+                                        <button className="p-1 rounded-lg hover:bg-slate-100"><span className="material-symbols-outlined">chevron_right</span></button>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-7 gap-2 text-center text-xs text-slate-400 mb-2">
+                                    {next7Days.map((d, i) => (
+                                        <span key={`dayname-${i}`}>{d.toLocaleDateString('tr-TR', { weekday: 'short' })}</span>
+                                    ))}
+                                </div>
+                                <div className="grid grid-cols-7 gap-2">
+                                    {next7Days.map((d, i) => {
+                                        const dayNum = d.getDate();
+                                        return (
+                                            <div
+                                                key={`cur-${dayNum}`}
+                                                onClick={() => setSelectedDate(dayNum)}
+                                                className={`h-11 flex items-center justify-center rounded-xl cursor-pointer shadow-sm transition-all ${selectedDate === dayNum
+                                                    ? "bg-[var(--color-primary)] text-white font-bold"
+                                                    : "font-medium hover:bg-slate-50 border border-transparent hover:border-slate-100"
+                                                    }`}
+                                            >
+                                                {dayNum}
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+                            <div className="space-y-3">
+                                <p className="text-sm font-bold text-slate-600 mb-3 uppercase tracking-wider">Müsait Saatler</p>
+                                <div className="grid grid-cols-3 gap-2">
+                                    {[
+                                        { time: "09:00" },
+                                        { time: "10:30", label: "AI Önerisi" },
+                                        { time: "11:30" },
+                                        { time: "13:00", label: "En Verimli" },
+                                        { time: "14:30" },
+                                        { time: "15:00" },
+                                        { time: "16:30", disabled: true },
+                                        { time: "17:00" },
+                                        { time: "18:30" },
+                                    ].map((slot, i) => {
+                                        const isSelected = selectedTime === slot.time;
+                                        const isDisabled = slot.disabled;
+
+                                        if (isDisabled) {
+                                            return (
+                                                <button key={i} disabled className="py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-300 line-through bg-slate-50 cursor-not-allowed">
+                                                    {slot.time}
+                                                </button>
+                                            );
+                                        }
+
+                                        if (slot.label) {
+                                            return (
+                                                <button
+                                                    key={i}
+                                                    onClick={() => setSelectedTime(slot.time)}
+                                                    className={`py-2 rounded-xl flex flex-col items-center justify-center relative overflow-hidden transition-all ${isSelected
+                                                        ? "border-2 border-[var(--color-primary)] bg-[var(--color-primary)]/5 text-[var(--color-primary)] font-bold shadow-md shadow-[var(--color-primary)]/10"
+                                                        : "border border-slate-200 text-slate-600 hover:border-[var(--color-primary)]/50 hover:bg-slate-50"
+                                                        }`}
+                                                >
+                                                    <span className={`text-sm ${isSelected ? 'font-bold' : 'font-medium'}`}>{slot.time}</span>
+                                                    <span className={`text-[10px] ${isSelected ? 'text-[var(--color-primary)] opacity-100' : 'text-slate-400 opacity-70'}`}>{slot.label}</span>
+                                                    {isSelected && <div className="absolute top-0 right-0 w-8 h-8 bg-[var(--color-primary)]/10 rotate-45 translate-x-4 -translate-y-4"></div>}
+                                                </button>
+                                            );
+                                        }
+
+                                        return (
+                                            <button
+                                                key={i}
+                                                onClick={() => setSelectedTime(slot.time)}
+                                                className={`py-2.5 rounded-xl text-sm transition-all flex items-center justify-center ${isSelected
+                                                    ? "border-2 border-[var(--color-primary)] bg-[var(--color-primary)]/5 text-[var(--color-primary)] font-bold shadow-md shadow-[var(--color-primary)]/10"
+                                                    : "border border-slate-200 font-medium text-slate-600 hover:border-[var(--color-primary)]/50 hover:bg-slate-50"
+                                                    }`}
+                                            >
+                                                {slot.time}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+
+                {/* Sağ Taraf - Özet Paneli */}
+                <div className="lg:col-span-4">
+                    <div className="sticky top-28">
+                        <div className="bg-white rounded-3xl border border-slate-200 shadow-xl overflow-hidden">
+                            <div className="bg-[var(--color-primary)] p-6 text-white">
+                                <h3 className="text-xl font-bold">Randevu Özeti</h3>
+                                <p className="text-sm text-purple-200 mt-1 opacity-80">Seçilen hizmetlerin toplam tutarı.</p>
+                            </div>
+                            <div className="p-6 space-y-6">
+                                <div className="flex items-center gap-4 pb-6 border-b border-slate-100">
+                                    <div className="size-12 rounded-full bg-slate-200 flex items-center justify-center text-slate-400">
+                                        <span className="material-symbols-outlined">person</span>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Müşteri</p>
+                                        <h4 className="font-bold text-slate-900">Ayşe Yılmaz</h4>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <div className="flex justify-between items-center">
+                                        <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Hizmetler ({selectedServices.length})</p>
+                                        {totalDuration > 0 && (
+                                            <p className="text-xs text-slate-500 font-medium">Toplam {totalDuration} dk</p>
+                                        )}
+                                    </div>
+
+                                    {selectedServices.length === 0 ? (
+                                        <div className="text-sm text-slate-400 italic text-center py-4">Sol taraftan hizmet seçiniz.</div>
+                                    ) : (
+                                        selectedServices.map(service => (
+                                            <div key={service.id} className="flex justify-between items-center group">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="w-1 h-8 bg-[var(--color-primary)] rounded-full"></span>
+                                                    <div>
+                                                        <p className="text-sm font-bold text-slate-700">{service.name}</p>
+                                                        <p className="text-xs text-slate-400">{service.duration_minutes} dakika</p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-1">
+                                                    <span className="text-sm font-bold text-slate-900">₺{service.price}</span>
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+
+                                {selectedDate && selectedTime ? (
+                                    <div className="p-4 bg-[var(--color-primary)]/5 rounded-2xl border border-[var(--color-primary)]/20 text-[var(--color-primary)]">
+                                        <div className="flex items-center gap-3 mb-2">
+                                            <span className="material-symbols-outlined">calendar_month</span>
+                                            <p className="text-sm font-bold">{selectedDate} {displayMonthYear.split(' ')[0]}</p>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <span className="material-symbols-outlined">schedule</span>
+                                            <p className="text-sm font-bold">Saat: {selectedTime} {endTimeStr && `- ${endTimeStr}`}</p>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl text-center text-sm font-medium text-slate-400">
+                                        Tarih ve saat seçilmedi
+                                    </div>
+                                )}
+
+                                <div className="pt-6 border-t border-slate-100 space-y-3">
+                                    <div className="flex justify-between text-slate-500">
+                                        <span>Ara Toplam</span>
+                                        <span>₺{subtotal.toFixed(2)}</span>
+                                    </div>
+                                    <div className="flex justify-between text-slate-500">
+                                        <span>KDV (%20)</span>
+                                        <span>₺{taxAmount.toFixed(2)}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center pt-2">
+                                        <span className="font-bold text-lg text-slate-900">Toplam</span>
+                                        <span className="font-bold text-2xl text-[var(--color-primary)]">₺{totalAmount.toFixed(2)}</span>
+                                    </div>
+                                </div>
+
+                                <div className="pt-4 space-y-3">
+                                    <button
+                                        onClick={handleCreateAppointment}
+                                        disabled={selectedServices.length === 0 || !selectedCustomer || isSubmitting}
+                                        className="w-full bg-[var(--color-primary)] text-white py-4 rounded-2xl font-bold shadow-lg shadow-[var(--color-primary)]/20 hover:opacity-90 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        {isSubmitting ? "Kaydediliyor..." : "Randevuyu Oluştur"}
+                                        {!isSubmitting && <span className="material-symbols-outlined">arrow_forward</span>}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+            {/* Müşteri Seçme Modalı (Basit Versiyon) */}
+            {isCustomerModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center">
+                    <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setIsCustomerModalOpen(false)}></div>
+                    <div className="relative bg-white w-full max-w-md rounded-3xl shadow-2xl p-6 m-4 max-h-[80vh] flex flex-col">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-xl font-bold text-slate-900">Müşteri Seçin</h3>
+                            <button onClick={() => setIsCustomerModalOpen(false)} className="size-8 flex items-center justify-center rounded-full hover:bg-slate-100 text-slate-500">
+                                <span className="material-symbols-outlined">close</span>
+                            </button>
+                        </div>
+                        <div className="relative mb-4">
+                            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">search</span>
+                            <input type="text" placeholder="Müşteri ara..." className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:border-[var(--color-primary)] focus:ring-1 focus:ring-[var(--color-primary)] outline-none" />
+                        </div>
+                        <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar">
+                            {customers.length === 0 ? (
+                                <div className="text-center py-8 text-slate-400">
+                                    <p className="text-sm">Hiç müşteri bulunamadı.</p>
+                                    <p className="text-xs mt-1">Lütfen önce Müşteriler sayfasından müşteri ekleyin.</p>
+                                </div>
+                            ) : (
+                                customers.map(customer => (
+                                    <div
+                                        key={customer.id}
+                                        onClick={() => {
+                                            setSelectedCustomer(customer);
+                                            setIsCustomerModalOpen(false);
+                                        }}
+                                        className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer border transition-all ${selectedCustomer?.id === customer.id ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10' : 'border-slate-100 hover:border-slate-300'}`}
+                                    >
+                                        <div className="size-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-500">
+                                            <span className="material-symbols-outlined">person</span>
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-bold text-slate-900">{customer.first_name} {customer.last_name}</p>
+                                            <p className="text-xs text-slate-500">{customer.phone}</p>
+                                        </div>
+                                        {selectedCustomer?.id === customer.id && (
+                                            <span className="material-symbols-outlined text-[var(--color-primary)] ml-auto">check_circle</span>
+                                        )}
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
