@@ -1,17 +1,11 @@
 import Image from "next/image";
+import { GlobalSearch } from "@/components/search/GlobalSearch";
 
 export function Header() {
     return (
         <header className="h-20 bg-white/80 backdrop-blur-md border-b border-slate-100 px-10 flex items-center justify-between sticky top-0 z-20">
             <div className="flex items-center gap-4 w-1/2">
-                <div className="relative w-full max-w-sm">
-                    <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-xl">search</span>
-                    <input
-                        className="w-full pl-12 pr-4 py-2.5 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-[var(--color-primary)]/20 text-sm placeholder:text-slate-400 outline-none"
-                        placeholder="Müşteri veya hizmet ara..."
-                        type="text"
-                    />
-                </div>
+                <GlobalSearch />
             </div>
             <div className="flex items-center gap-6">
                 <div className="flex items-center gap-4">

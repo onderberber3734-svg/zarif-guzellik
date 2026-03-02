@@ -4,9 +4,24 @@ import { useState, useTransition, useEffect, useRef, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { updateAppointmentStatus, deleteAppointment } from "@/app/actions/appointments";
+import CustomerLink from "@/components/CustomerLink";
 
 interface RandevularClientProps {
     appointments: any[];
+}
+
+// Canlı Saat Hook'u
+function useLiveTime() {
+    const [liveTime, setLiveTime] = useState(new Date());
+
+    useEffect(() => {
+        const timer = setInterval(() => {
+            setLiveTime(new Date());
+        }, 30000); // 30 saniyede bir güncelle (dakikayı yakalamak için yeterli)
+        return () => clearInterval(timer);
+    }, []);
+
+    return liveTime;
 }
 
 // Tarih/Saat Format Yardımcıları
@@ -79,6 +94,9 @@ export default function RandevularClient({ appointments }: RandevularClientProps
 function RandevularClientContent({ appointments }: RandevularClientProps) {
     const [isPending, startTransition] = useTransition();
     const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
+
+    // Canlı Saat
+    const liveTime = useLiveTime();
 
     // Takvim Offset State (0 = Mevcut hafta, -1 geçen hafta, 1 gelecek hafta)
     const [weekOffset, setWeekOffset] = useState(0);
@@ -257,9 +275,12 @@ function RandevularClientContent({ appointments }: RandevularClientProps) {
                                                                 <p className={`text-[10px] font-bold ${colorScheme.textPrimary}`}>{formatTime(appt.appointment_time)}</p>
                                                                 {appt.status === "completed" && <span className="material-symbols-outlined text-[12px] text-emerald-600">check_circle</span>}
                                                             </div>
-                                                            <p className="text-sm font-bold text-slate-800 truncate" title={`${customer.first_name} ${customer.last_name}`}>
-                                                                {customer.first_name} {customer.last_name}
-                                                            </p>
+                                                            <CustomerLink
+                                                                id={customer.id}
+                                                                firstName={customer.first_name}
+                                                                lastName={customer.last_name}
+                                                                className="text-sm font-bold text-slate-800 truncate block"
+                                                            />
                                                             <p className={`text-[10px] ${colorScheme.textSecondary} italic truncate mt-0.5`} title={servicesText}>
                                                                 {servicesText}
                                                             </p>
@@ -307,6 +328,7 @@ function RandevularClientContent({ appointments }: RandevularClientProps) {
                                         appt={appt}
                                         isToday={true}
                                         startTransition={startTransition}
+                                        liveTime={liveTime}
                                     />
                                 ))
                             )}
@@ -350,7 +372,12 @@ function RandevularClientContent({ appointments }: RandevularClientProps) {
                                                                         <span className="text-[var(--color-primary)] font-bold text-sm block leading-none">{formatTime(appt.appointment_time)}</span>
                                                                     </div>
                                                                     <div className="flex-1 min-w-0">
-                                                                        <p className="text-[15px] font-bold text-slate-900 truncate">{customer.first_name} {customer.last_name}</p>
+                                                                        <CustomerLink
+                                                                            id={customer.id}
+                                                                            firstName={customer.first_name}
+                                                                            lastName={customer.last_name}
+                                                                            className="text-[15px] font-bold text-slate-900 truncate block"
+                                                                        />
                                                                         <p className="text-[13px] text-slate-500 truncate">{servicesText}</p>
                                                                     </div>
                                                                     <span className="material-symbols-outlined text-slate-200 text-xl group-hover:text-[var(--color-primary)]/50 transition-colors">chevron_right</span>
@@ -406,7 +433,7 @@ function RandevularClientContent({ appointments }: RandevularClientProps) {
 // ============================================================
 // Randevu Kartı (AppointmentCard) Bileşeni
 // ============================================================
-function AppointmentCard({ appt, isToday = false, startTransition }: { appt: any, isToday?: boolean, startTransition: any }) {
+function AppointmentCard({ appt, isToday = false, startTransition, liveTime }: { appt: any, isToday?: boolean, startTransition: any, liveTime?: Date }) {
     const customer = appt.customer || {};
     const status: string = appt.status || "scheduled";
     const servicesText = appt.services?.map((s: any) => s.service?.name).filter(Boolean).join(', ') || 'Belirtilmedi';
@@ -433,12 +460,37 @@ function AppointmentCard({ appt, isToday = false, startTransition }: { appt: any
         };
     }, [menuOpen]);
 
-    // Status Kontrolleri
+    // Status Kontrolleri (Database Status)
     const isNoShow = status === "no_show";
     const isCompleted = status === "completed";
     const isCanceled = status === "canceled";
     const isCheckedIn = status === "checked_in";
     const isScheduled = status === "scheduled";
+
+    // Canlı Zaman Hesaplamaları (Sadece bugün ve Scheduled/Checked-in ise)
+    let opsStatus = "normal"; // normal, late, soon, now, noshow_candidate
+    let minutesDiff = 0;
+
+    if (isToday && liveTime && (isScheduled || isCheckedIn)) {
+        const [hour, min] = formatTime(appt.appointment_time).split(":").map(Number);
+
+        // Randevunun tam tarihi ve saati
+        const [y, m, d] = appt.appointment_date.split("-").map(Number);
+        const apptDateTime = new Date(y, m - 1, d, hour, min, 0);
+
+        // Şimdiki zaman ile farkı (dakika cinsinden)
+        minutesDiff = Math.floor((liveTime.getTime() - apptDateTime.getTime()) / 60000);
+
+        if (minutesDiff > 30 && isScheduled) {
+            opsStatus = "noshow_candidate"; // 30 dk geçti hala gelmedi
+        } else if (minutesDiff > 0) {
+            opsStatus = "late"; // Gecikti (0-30 dk arası)
+        } else if (minutesDiff === 0) {
+            opsStatus = "now"; // Tam şu an
+        } else if (minutesDiff >= -30) {
+            opsStatus = "soon"; // Yaklaşıyor (yarım saat kaldı)
+        }
+    }
 
     // Action Handlers
     const handleStatusUpdate = (newStatus: any) => {
@@ -459,22 +511,43 @@ function AppointmentCard({ appt, isToday = false, startTransition }: { appt: any
     };
 
     // Card Tasarımı belirtecileri
-    const cardBorder = isToday && (isScheduled || isCheckedIn) ? "border-[var(--color-primary)]/30 ring-4 ring-[var(--color-primary)]/5" : "border-slate-200/60";
+    let cardBorder = "border-slate-200/60";
+    let activeLeftStrip = false;
+    let stripColor = "bg-[var(--color-primary)]";
+
+    if (isToday && (isScheduled || isCheckedIn)) {
+        if (opsStatus === 'noshow_candidate') {
+            cardBorder = "border-rose-300 ring-4 ring-rose-50";
+            activeLeftStrip = true;
+            stripColor = "bg-rose-500";
+        } else if (opsStatus === 'late') {
+            cardBorder = "border-amber-300 ring-4 ring-amber-50";
+            activeLeftStrip = true;
+            stripColor = "bg-amber-500";
+        } else if (opsStatus === 'soon' || opsStatus === 'now') {
+            cardBorder = "border-[var(--color-primary)]/40 ring-4 ring-[var(--color-primary)]/10";
+            activeLeftStrip = true;
+            stripColor = "bg-[var(--color-primary)]";
+        } else {
+            cardBorder = "border-[var(--color-primary)]/20 ring-4 ring-[var(--color-primary)]/5";
+            activeLeftStrip = true;
+        }
+    }
+
     const opacityClass = (isNoShow || isCanceled) ? "opacity-75 grayscale-[0.3]" : "";
-    const activeLeftStrip = isToday && (isScheduled || isCheckedIn);
 
     // Telefon Linki
     const phoneLink = customer.phone ? `tel:${customer.phone.replace(/\s+/g, '')}` : "#";
 
     return (
-        <div className={`bg-white p-5 rounded-3xl border ${cardBorder} shadow-sm flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-6 hover:shadow-md transition-shadow relative ${opacityClass}`}>
+        <div className={`bg-white p-5 rounded-3xl border ${cardBorder} shadow-sm flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-6 hover:shadow-md transition-all relative ${menuOpen ? 'z-50' : 'z-10'} ${opacityClass}`}>
 
             {/* Sol aktiflik şeridi */}
-            {activeLeftStrip && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-[var(--color-primary)]"></div>}
+            {activeLeftStrip && <div className={`absolute left-0 top-0 bottom-0 w-1.5 rounded-l-3xl ${stripColor}`}></div>}
 
             {/* Saat Alanı */}
             <div className={`text-center w-24 border-r border-slate-100 pr-4 shrink-0 ${activeLeftStrip ? 'pl-2' : ''}`}>
-                <p className={`text-2xl font-extrabold tracking-tight ${isNoShow ? 'text-rose-500' : isCompleted ? 'text-emerald-600' : isCanceled ? 'text-slate-400' : 'text-[var(--color-primary)]'}`}>
+                <p className={`text-2xl font-extrabold tracking-tight ${isNoShow ? 'text-rose-500' : isCompleted ? 'text-emerald-600' : isCanceled ? 'text-slate-400' : opsStatus === 'late' || opsStatus === 'noshow_candidate' ? 'text-rose-600' : 'text-[var(--color-primary)]'}`}>
                     {formatTime(appt.appointment_time)}
                 </p>
                 <p className="text-[13px] text-slate-400 font-medium mt-0.5">{appt.total_duration_minutes} dk</p>
@@ -490,11 +563,17 @@ function AppointmentCard({ appt, isToday = false, startTransition }: { appt: any
                 <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2 mb-1">
                         <h4 className={`font-bold text-lg leading-none ${isNoShow || isCanceled ? 'text-slate-500 line-through decoration-slate-300' : 'text-slate-900 group-hover:text-[var(--color-primary)] transition-colors'}`}>
-                            {customer.first_name} {customer.last_name}
+                            <CustomerLink id={customer.id} firstName={customer.first_name} lastName={customer.last_name} className="text-inherit hover:text-[var(--color-primary)] transition-colors" />
                         </h4>
 
-                        {/* Status Badges */}
-                        {isScheduled && <span className="px-2.5 py-0.5 bg-blue-50 text-blue-600 border border-blue-100 text-[10px] font-bold rounded-full uppercase tracking-wider">BEKLİYOR</span>}
+                        {/* Canlı Operasyon Badgeleri */}
+                        {opsStatus === 'now' && <span className="px-2.5 py-0.5 bg-emerald-50 text-emerald-600 border border-emerald-100 text-[10px] font-bold rounded-full uppercase tracking-wider animate-pulse flex items-center gap-1"><span className="size-1.5 bg-emerald-500 rounded-full"></span>ŞİMDİ</span>}
+                        {opsStatus === 'soon' && <span className="px-2.5 py-0.5 bg-blue-50 text-blue-600 border border-blue-100 text-[10px] font-bold rounded-full uppercase tracking-wider flex items-center gap-1"><span className="material-symbols-outlined text-[10px]">timer</span>YAKLAŞIYOR ({Math.abs(minutesDiff)} dk)</span>}
+                        {opsStatus === 'late' && <span className="px-2.5 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-bold rounded-full uppercase tracking-wider flex items-center gap-1"><span className="material-symbols-outlined text-[10px]">warning</span>GECİKTİ ({minutesDiff} dk)</span>}
+                        {opsStatus === 'noshow_candidate' && <span className="px-2.5 py-0.5 bg-rose-50 text-rose-600 border border-rose-200 text-[10px] font-bold rounded-full uppercase tracking-wider flex items-center gap-1"><span className="material-symbols-outlined text-[10px]">error</span>{minutesDiff} DK GECİKTİ</span>}
+
+                        {/* Status Badges (Sadece normal ve tamamlanmış durumlar için, opsStatus varsa ezilmesin) */}
+                        {isScheduled && opsStatus === 'normal' && <span className="px-2.5 py-0.5 bg-slate-100 text-slate-600 border border-slate-200 text-[10px] font-bold rounded-full uppercase tracking-wider">BEKLİYOR</span>}
                         {isCheckedIn && <span className="px-2.5 py-0.5 bg-indigo-50 text-indigo-600 border border-indigo-100 text-[10px] font-bold rounded-full uppercase tracking-wider">SALONDA</span>}
                         {isNoShow && <span className="px-2.5 py-0.5 bg-rose-50 text-rose-600 border border-rose-100 text-[10px] font-bold rounded-full uppercase tracking-wider">GELMEDİ</span>}
                         {isCanceled && <span className="px-2.5 py-0.5 bg-slate-100 text-slate-600 border border-slate-200 text-[10px] font-bold rounded-full uppercase tracking-wider">İPTAL EDİLDİ</span>}
@@ -519,7 +598,26 @@ function AppointmentCard({ appt, isToday = false, startTransition }: { appt: any
                     </span>
                 )}
 
-                {isScheduled && (
+                {/* Gecikmiş / No Show Adayı İçin Öncelikli Aksiyonlar */}
+                {isScheduled && (opsStatus === 'late' || opsStatus === 'noshow_candidate') && (
+                    <div className="flex items-center gap-2">
+                        {customer.phone && (
+                            <a href={phoneLink} className="px-4 py-2.5 bg-rose-50 text-rose-600 hover:bg-rose-100 hover:text-rose-700 border border-rose-200 rounded-xl font-bold text-sm transition-colors flex items-center gap-2">
+                                <span className="material-symbols-outlined text-[18px]">call</span>
+                                Ara
+                            </a>
+                        )}
+                        <button
+                            onClick={() => handleStatusUpdate('no_show')}
+                            className="px-4 py-2.5 bg-white border border-slate-200 text-slate-600 hover:border-rose-300 hover:text-rose-600 rounded-xl font-bold text-sm transition-all flex items-center gap-2"
+                        >
+                            Gelmedi İşaretle
+                        </button>
+                    </div>
+                )}
+
+                {/* Normal Scheduled Actions */}
+                {isScheduled && (opsStatus === 'soon' || opsStatus === 'now' || opsStatus === 'normal') && (
                     <button
                         onClick={() => handleStatusUpdate('checked_in')}
                         className="px-6 py-2.5 bg-[var(--color-primary)] text-white rounded-xl font-bold text-sm hover:shadow-lg hover:shadow-[var(--color-primary)]/30 transition-all flex items-center gap-2"
@@ -531,14 +629,16 @@ function AppointmentCard({ appt, isToday = false, startTransition }: { appt: any
                 {isCheckedIn && (
                     <button
                         onClick={() => handleStatusUpdate('completed')}
-                        className="px-6 py-2.5 bg-white border-2 border-slate-200 text-slate-700 rounded-xl font-bold text-sm hover:border-[var(--color-primary)] hover:text-[var(--color-primary)] transition-all flex items-center gap-2"
+                        className="px-6 py-2.5 bg-white border-2 border-[var(--color-primary)] text-[var(--color-primary)] shadow-[0_0_15px_rgba(var(--color-primary-rgb),0.1)] rounded-xl font-bold text-sm hover:bg-[var(--color-primary)] hover:text-white transition-all flex items-center gap-2"
                     >
-                        Tamamla
+                        <span className="material-symbols-outlined text-[18px]">done_all</span>
+                        İşlemi Tamamla
                     </button>
                 )}
 
+                {/* Pasif olan durumlarda sadece ara ikonu (Eğer çoktan gelmedi/iptal ise) */}
                 {(isNoShow || isCanceled) && customer.phone && (
-                    <a href={phoneLink} className="p-2 text-[var(--color-primary)] hover:bg-[var(--color-primary)]/10 rounded-xl transition-colors shrink-0 flex items-center justify-center">
+                    <a href={phoneLink} className="p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600 rounded-xl transition-colors shrink-0 flex items-center justify-center border border-transparent">
                         <span className="material-symbols-outlined">call</span>
                     </a>
                 )}
@@ -561,6 +661,18 @@ function AppointmentCard({ appt, isToday = false, startTransition }: { appt: any
                                         {/* Düzenle (Şimdilik işlevi yok, modal bağlanacak) */}
                                         <button className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 font-medium hover:bg-slate-50 rounded-lg text-left" onClick={() => setMenuOpen(false)}>
                                             <span className="material-symbols-outlined text-[18px]">edit</span> Düzenle
+                                        </button>
+                                        <button
+                                            onClick={() => handleStatusUpdate('checked_in')}
+                                            className="flex items-center gap-2 px-3 py-2 text-sm text-[var(--color-primary)] font-medium hover:bg-[var(--color-primary)]/10 rounded-lg text-left"
+                                        >
+                                            <span className="material-symbols-outlined text-[18px]">where_to_vote</span> Check-in
+                                        </button>
+                                        <button
+                                            onClick={() => handleStatusUpdate('completed')}
+                                            className="flex items-center gap-2 px-3 py-2 text-sm text-emerald-600 font-medium hover:bg-emerald-50 rounded-lg text-left"
+                                        >
+                                            <span className="material-symbols-outlined text-[18px]">check_circle</span> Tamamlandı
                                         </button>
                                         <button
                                             onClick={() => handleStatusUpdate('no_show')}

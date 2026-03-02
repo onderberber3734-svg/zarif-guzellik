@@ -203,7 +203,7 @@ export async function previewCampaignTargets(segment: string) {
     };
 }
 
-// Kampanya durumunu günceller
+// Kampanya durumunu günceller (Status: active, paused, draft, vb.)
 export async function updateCampaignStatus(id: string, newStatus: string) {
     const supabase = await createClient();
 
@@ -216,6 +216,60 @@ export async function updateCampaignStatus(id: string, newStatus: string) {
         return { success: false, error: error.message };
     }
     return { success: true };
+}
+
+// Kampanyayı tamamen siler
+export async function deleteCampaign(id: string) {
+    const supabase = await createClient();
+
+    // RLS will ensure users can only delete their own business's campaigns
+    const { error } = await supabase
+        .from('campaigns')
+        .delete()
+        .eq('id', id);
+
+    if (error) {
+        return { success: false, error: error.message };
+    }
+    return { success: true };
+}
+
+// Kampanya detaylarını günceller (Edit form action)
+export async function updateCampaignDetails(id: string, campaignData: any) {
+    const supabase = await createClient();
+
+    // Kanalına göre gönderim statüsü belirle (Array logic)
+    let sendStatus = 'draft';
+    const channels: string[] = campaignData.channel || ['none'];
+
+    if (channels.some(ch => ['whatsapp', 'sms', 'email', 'push'].includes(ch))) {
+        sendStatus = 'integration_pending';
+    } else if (channels.includes('manual')) {
+        sendStatus = 'ready';
+    }
+
+    const { data: updatedCampaign, error: updateError } = await supabase
+        .from('campaigns')
+        .update({
+            name: campaignData.name,
+            description: campaignData.description || null,
+            offer_type: campaignData.offer_type,
+            offer_details: campaignData.offer_details,
+            target_segment: campaignData.target_segment,
+            channel: channels,
+            send_status: sendStatus,
+            updated_at: new Date().toISOString()
+        })
+        .eq('id', id)
+        .select()
+        .single();
+
+    if (updateError) {
+        console.error("Kampanya güncellenirken hata:", updateError);
+        return { success: false, error: updateError.message };
+    }
+
+    return { success: true, data: updatedCampaign };
 }
 
 // AI İsteklerini ve Sonuçlarını Loglamak İçin Sistem Metodu
@@ -243,4 +297,32 @@ export async function logAiAction(moduleStr: string, promptText: string, respons
             error_message: errorMsg,
             duration_ms: durationMs
         });
+}
+
+// Kampanyadan dönüş yapan müşterileri (converted) getirir
+export async function getConvertedTargets(campaignId: string) {
+    const supabase = await createClient();
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) throw new Error("Yetkisiz erişim");
+
+    const { data, error } = await supabase
+        .from('campaign_targets')
+        .select(`
+            id,
+            status,
+            converted_at,
+            converted_appointment_id,
+            customers(first_name, last_name, phone)
+        `)
+        .eq('campaign_id', campaignId)
+        .eq('status', 'converted')
+        .order('converted_at', { ascending: false });
+
+    if (error) {
+        console.error("Dönüşen müşteriler çekilirken hata:", error);
+        return [];
+    }
+
+    return data || [];
 }

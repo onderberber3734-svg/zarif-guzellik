@@ -37,204 +37,185 @@ export async function seedDemoData(): Promise<{ success: boolean; message: strin
     const currentYear = 2026;
     const currentMonth = "03"; // Mart (01.03.2026 test target'ı)
 
-    // 3. Müşteri verileri - AI TEST SENARYOLARI İÇİN ÖZEL HAZIRLANDI
-    const customerList = [
-        // 0: Sadık Müşteri, VIP, Doğum Günü Bu Ay
-        { first_name: "Selin", last_name: "Aras", phone: "0532 555 1234", email: "selin.aras@example.com", is_vip: true, birth_date: `1990-${currentMonth}-15`, notes: "VIP müşteri. Cilt bakımına çok önem verir." },
-        // 1: Düzenli Ziyaretçi (3 randevu son 90 gün)
-        { first_name: "Ayşe", last_name: "Yılmaz", phone: "0533 222 3456", email: "ayse.yilmaz@gmail.com", is_vip: false, birth_date: "1985-06-20", notes: "Düzenli müşteri. Her ay gelir." },
-        // 2: Riskli / Geri Kazanılabilir (100+ gündür gelmiyor)
-        { first_name: "Merve", last_name: "Kaya", phone: "0542 111 9876", email: "merve.k@hotmail.com", is_vip: false, birth_date: "1992-11-05", notes: "Uzun süredir gelmiyor. Takip edilmeli." },
-        // 3: Yeni Başlangıç (1 randevusu var)
-        { first_name: "Zeynep", last_name: "Demir", phone: "0555 777 2211", email: "zeynep.demir@outlook.com", is_vip: false, birth_date: null, notes: "Yeni müşteri. İlk kez geldi." },
-        // 4: Sadık Müşteri (10 randevu)
-        { first_name: "Leyla", last_name: "Şahin", phone: "0544 888 4455", email: "leyla.sahin@gmail.com", is_vip: true, birth_date: "1988-02-14", notes: "En sadık müşteri." },
-        // 5: Potansiyeli Yüksek (2 randevu ama pahalı hizmetler / VIP)
-        { first_name: "Nur", last_name: "Çelik", phone: "0532 100 5566", email: "nur.celik@test.com", is_vip: true, birth_date: null, notes: "Kalıcı makyaj konusunda çok meraklı." },
-        // 6: Riskli (Sadece 1 kez gelmiş, 6 ay önce)
-        { first_name: "Canan", last_name: "Şen", phone: "0533 444 7788", email: null, is_vip: false, birth_date: "1995-08-30", notes: "Telefon ile de aranabilir." },
-        // 7: Düzenli Ziyaretçi, VIP Doğum günü bu ay
-        { first_name: "Fatma", last_name: "Öztürk", phone: "0542 999 3322", email: "fatma@example.com", is_vip: true, birth_date: `1980-${currentMonth}-22`, notes: "Düğün öncesi bakım paketi yaptı." },
-        // 8: Yeni Başlangıç (Hiç randevusu yok, yeni kayıt)
-        { first_name: "Gamze", last_name: "Arslan", phone: "0555 123 4567", email: "gamze.a@outlook.com", is_vip: false, birth_date: null, notes: "Kirpik uzatmaya ilgi duyuyor." },
-        // 9: Riskli
-        { first_name: "İpek", last_name: "Kurt", phone: "0544 456 7890", email: null, is_vip: false, birth_date: null, notes: "Aylardır gelmiyor." },
-        // 10: Düzenli
-        { first_name: "Büşra", last_name: "Aydın", phone: "0532 321 6543", email: "busra@test.com", is_vip: false, birth_date: "1994-01-10", notes: "Saç bakımı ve fön tercih eder." },
-        // 11: Sadık
-        { first_name: "Pınar", last_name: "Doğan", phone: "0533 654 3210", email: "pinar.dogan@gmail.com", is_vip: true, birth_date: null, notes: "Daima erken gelir." },
-        // 12: Düzenli
-        { first_name: "Deniz", last_name: "Aksoy", phone: "0542 777 8899", email: null, is_vip: false, birth_date: null, notes: "Haftalık cilt bakımı müşterisi." },
-        // 13: Yeni
-        { first_name: "Ece", last_name: "Sert", phone: "0555 234 5678", email: "ece.sert@mail.com", is_vip: false, birth_date: `1999-${currentMonth}-02`, notes: "Doğum Günü bu ay!" },
-        // 14: Riskli
-        { first_name: "Melis", last_name: "Yıldız", phone: "0544 567 8901", email: "melis.yildiz@hotmail.com", is_vip: false, birth_date: null, notes: "Hydrafacial müdavimiydi." },
-        // 15: Düzenli ama dün gelmedi (No show)
-        { first_name: "Buse", last_name: "Güler", phone: "0532 890 1234", email: null, is_vip: false, birth_date: null, notes: "Bazen iptal ediyor. Hatırlatıcı lazım." },
-        // 16: Yeni Başlangıç (Gelecekte randevusu var sadece)
-        { first_name: "Hande", last_name: "Koç", phone: "0533 012 3456", email: "hande.koc@example.com", is_vip: false, birth_date: null, notes: "Sadece ilk randevusu planlandı." },
-        // 17: Sadık Müşteri VIP
-        { first_name: "Tuğba", last_name: "Polat", phone: "0542 345 6789", email: null, is_vip: true, birth_date: "1987-12-12", notes: "Arkadaş tavsiyesiyle geldi, hiç bırakmadı." },
-    ];
+    // 3. İsim ve Soyisim Havuzları
+    const firstNamesFemale = ["Selin", "Ayşe", "Merve", "Zeynep", "Leyla", "Nur", "Canan", "Fatma", "Gamze", "İpek", "Büşra", "Pınar", "Deniz", "Ece", "Melis", "Buse", "Hande", "Tuğba", "Elif", "Derya", "Gözde", "Ceren", "Eylül", "Aslı", "Sinem", "Damla", "Gizem", "Cansu", "Özge", "Esra"];
+    const firstNamesMale = ["Ahmet", "Mehmet", "Can", "Burak", "Emre", "Cem", "Mert", "Ali", "Ozan", "Hakan"];
+    const lastNames = ["Yılmaz", "Kaya", "Demir", "Şahin", "Çelik", "Şen", "Öztürk", "Arslan", "Kurt", "Aydın", "Doğan", "Aksoy", "Sert", "Yıldız", "Güler", "Koç", "Polat", "Aras", "Kılıç", "Özdemir", "Çetin", "Tekin", "Erdoğan", "Yavuz", "Güneş", "Aslan"];
 
-    // 4. Müşterileri ekle
+    // Rastgele eleman seçici
+    const randomItem = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+
+    // Rastgele tarih (Yıl aralığı)
+    const randomDate = (startYear: number, endYear: number, forceCurrentMonth: boolean = false) => {
+        const year = startYear + Math.floor(Math.random() * (endYear - startYear));
+        const month = forceCurrentMonth ? currentMonth : String(Math.floor(Math.random() * 12) + 1).padStart(2, '0');
+        const day = String(Math.floor(Math.random() * 28) + 1).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+
+    // Rastgele Türk telefon numarası
+    const generatePhone = () => {
+        const prefixes = ["532", "533", "555", "542", "544", "505", "507", "530"];
+        const prefix = randomItem(prefixes);
+        const p1 = String(Math.floor(Math.random() * 1000)).padStart(3, '0');
+        const p2 = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+        return `0${prefix} ${p1} ${p2.substring(0, 2)} ${p2.substring(2)}`;
+    };
+
+    // 4. Müşteri (Customer) Üretimi (65 adet)
+    const generatedCustomers = [];
+    const NUM_CUSTOMERS = 65;
+
+    for (let i = 0; i < NUM_CUSTOMERS; i++) {
+        const isFemale = Math.random() > 0.15; // %85 Kadın müşteri (Sektör doğası gereği)
+        const fn = randomItem(isFemale ? firstNamesFemale : firstNamesMale);
+        const ln = randomItem(lastNames);
+
+        let targetSegment = 'all'; // Kategorileme fikir vermesi için
+        const randSeed = Math.random();
+
+        let is_vip = false;
+        let bDayForce = false;
+        let notes = "";
+
+        if (randSeed < 0.10) {
+            // 10% VIP
+            is_vip = true;
+            targetSegment = 'vip';
+            notes = "VIP müşteri. İlgilenilmeli.";
+        } else if (randSeed < 0.30) {
+            // 20% Düzenli
+            targetSegment = 'loyal';
+        } else if (randSeed < 0.55) {
+            // 25% Riskli / Geri kazanılabilir (Çok eski)
+            targetSegment = 'risk';
+        } else if (randSeed < 0.70) {
+            // 15% Doğum Günü
+            bDayForce = true;
+            notes = "Bu ay doğum günü var!";
+        } else {
+            //Kalanı Yeni / Normal
+            targetSegment = 'new';
+        }
+
+        generatedCustomers.push({
+            first_name: fn,
+            last_name: ln,
+            phone: generatePhone(),
+            email: Math.random() > 0.4 ? `${fn.toLowerCase()}.${ln.toLowerCase()}${i}@example.com` : null,
+            is_vip: is_vip,
+            birth_date: Math.random() > 0.3 ? randomDate(1975, 2002, bDayForce) : null,
+            notes: notes || null,
+            _targetSegment: targetSegment // Kendi içimizde takip için
+        });
+    }
+
+    // 5. Müşterileri veritabanına ekle
     const { data: insertedCustomers, error: custErr } = await supabase
         .from("customers")
-        .insert(customerList.map(c => ({ ...c, business_id: businessId })))
+        .insert(generatedCustomers.map(c => {
+            const { _targetSegment, ...rest } = c;
+            return { ...rest, business_id: businessId };
+        }))
         .select("id, first_name, last_name");
 
     if (custErr || !insertedCustomers) {
         return { success: false, message: "Müşteriler eklenemedi: " + custErr?.message };
     }
 
-    // 5. Baz tarih: 01.03.2026 (bugün)
+    // 6. Randevuları Planlama ve Eklemeler
     const getDateStr = (daysOffset: number) => {
         const d = new Date("2026-03-01T00:00:00Z");
         d.setUTCDate(d.getUTCDate() + daysOffset);
         return d.toISOString().split("T")[0]; // YYYY-MM-DD
     };
 
-    // 6. Rastgele hizmet seçici
-    const pickService = (index: number) => services[index % services.length];
+    const pickService = () => randomItem(services);
 
-    // 7. Randevu planı: [müşteri_index, gün_offset_from_2026-03-01, saat, status, servis_indexleri, yapay_fiyat_artisi_cani_isteyenler_icin]
-    // negatif = geçmiş (son 90 gün), 0 = bugün (01.03.2026), pozitif = gelecek
-    type ApptPlan = [number, number, string, string, number[], number?];
-    const appointmentPlans: ApptPlan[] = [
-        // ================= SADIK MÜŞTERİ (Index 0 - Selin) (5+ randevu, son 60 gün) =================
-        [0, -50, "10:00", "completed", [0, 1]],
-        [0, -40, "11:00", "completed", [0]],
-        [0, -30, "09:30", "completed", [1]],
-        [0, -15, "14:00", "completed", [0]],
-        [0, -5, "13:00", "completed", [0, 1]],
-        [0, 2, "11:00", "scheduled", [0]], // Gelecek randevusu da var
+    let totalApptsInserted = 0;
 
-        // ================= DÜZENLİ ZİYARETÇİ (Index 1 - Ayşe) (3-4 randevu, son 90 gün) =================
-        [1, -80, "13:00", "completed", [0]],
-        [1, -45, "10:30", "completed", [0]],
-        [1, -10, "15:00", "completed", [1]],
+    // Her müşteri için kategorisine göre randevu üret
+    for (let cIdx = 0; cIdx < insertedCustomers.length; cIdx++) {
+        const c_db = insertedCustomers[cIdx];
+        const c_meta = generatedCustomers[cIdx];
+        const segment = c_meta._targetSegment;
 
-        // ================= RİSKLİ/GERİ KAZANILABİLİR (Index 2 - Merve) (100+ gündür gelmiyor) =================
-        [2, -150, "11:00", "completed", [0]],
-        [2, -110, "14:30", "completed", [1]],
+        // Hangi günlere randevu atayacağız (Offsetler)
+        let apptOffsets: number[] = [];
 
-        // ================= YENİ BAŞLANGIÇ (Index 3 - Zeynep) (Sadece 1 geçmiş randevu) =================
-        [3, -5, "09:00", "completed", [0]],
+        if (segment === 'vip' || segment === 'loyal') {
+            // Sık gelenler: Son 120 gün içinde 3-8 randevu, belki gelecekte 1 randevu
+            const count = Math.floor(Math.random() * 5) + 3;
+            for (let i = 0; i < count; i++) apptOffsets.push(-Math.floor(Math.random() * 120));
+            if (Math.random() > 0.5) apptOffsets.push(Math.floor(Math.random() * 10) + 1); // Gelecek 1-10 gün
+        } else if (segment === 'risk') {
+            // Riskli: Uzun süredir gelmiyor (60-200 gün arası geçmişte 1-3 randevu)
+            const count = Math.floor(Math.random() * 2) + 1;
+            for (let i = 0; i < count; i++) apptOffsets.push(-Math.floor(Math.random() * 140) - 60);
+        } else if (segment === 'new') {
+            // Yeni: Son 30 gün içinde sadece 1 randevu veya sadece gelecekte 1 randevu
+            if (Math.random() > 0.3) {
+                apptOffsets.push(-Math.floor(Math.random() * 30));
+            } else {
+                apptOffsets.push(Math.floor(Math.random() * 15) + 1);
+            }
+        } else {
+            // Karışık
+            const count = Math.floor(Math.random() * 3);
+            for (let i = 0; i < count; i++) apptOffsets.push(-Math.floor(Math.random() * 90));
+        }
 
-        // ================= SADIK MÜŞTERİ (Index 4 - Leyla) (10+ randevu) =================
-        [4, -85, "16:00", "completed", [0]],
-        [4, -75, "11:00", "completed", [1]],
-        [4, -60, "14:30", "completed", [0]],
-        [4, -45, "10:00", "completed", [1]],
-        [4, -30, "12:00", "completed", [0]],
-        [4, -15, "09:30", "completed", [1]],
-        [4, 0, "14:00", "scheduled", [1]], // BUGÜN RANDVUSUO VAR
+        // Offsetleri tarihe göre sırala
+        apptOffsets.sort((a, b) => a - b);
 
-        // ================= POTANSİYELİ YÜKSEK (Index 5 - Nur) (Sadece 2 randevu ama toplamı 6000+ TL olsun) =================
-        [5, -20, "12:00", "completed", [0, 1], 3500], // Extradan 3500 tl fiyat
-        [5, -5, "09:30", "completed", [1], 4000],
+        for (const offset of apptOffsets) {
+            const timeHour = String(Math.floor(Math.random() * 9) + 9).padStart(2, '0'); // 09 - 17 arası
+            const timeMin = Math.random() > 0.5 ? "00" : "30";
+            const time = `${timeHour}:${timeMin}`;
 
-        // ================= RİSKLİ (Index 6 - Canan) =================
-        [6, -180, "13:00", "completed", [0]],
+            let status = 'completed';
+            if (offset > 0) status = 'scheduled';
+            if (offset === 0) status = Math.random() > 0.5 ? 'completed' : 'scheduled';
+            if (offset < 0 && Math.random() > 0.95) status = 'no_show'; // %5 ihtimalle geçmişte gelmedi
+            if (offset < 0 && Math.random() > 0.95) status = 'canceled'; // %5 ihtimalle iptal
 
-        // ================= DÜZENLİ ZİYARETÇİ (Index 7 - Fatma) =================
-        [7, -85, "10:30", "completed", [1]],
-        [7, -50, "14:00", "completed", [0, 1]],
-        [7, -18, "11:00", "completed", [0]],
+            // 1-2 servis seç
+            const srvCount = Math.random() > 0.7 ? 2 : 1;
+            const chosenServices = [];
+            for (let s = 0; s < srvCount; s++) chosenServices.push(pickService());
 
-        // ================= RİSKLİ (Index 9 - İpek) =================
-        [9, -200, "13:30", "completed", [0]],
-        [9, -120, "10:30", "completed", [1]],
+            const totalDuration = chosenServices.reduce((s, sv) => s + (sv.duration_minutes || 60), 0);
+            const totalPrice = chosenServices.reduce((s, sv) => s + (Number(sv.price) || 0), 0);
 
-        // ================= DÜZENLİ ZİYARETÇİ (Index 10 - Büşra) =================
-        [10, -70, "10:30", "completed", [1]],
-        [10, -35, "14:00", "completed", [0]],
-        [10, -10, "11:00", "completed", [0]],
+            const { data: appt, error: apptErr } = await supabase
+                .from("appointments")
+                .insert([{
+                    business_id: businessId,
+                    customer_id: c_db.id,
+                    appointment_date: getDateStr(offset),
+                    appointment_time: time,
+                    status,
+                    total_duration_minutes: totalDuration,
+                    total_price: totalPrice,
+                    notes: null,
+                }])
+                .select("id")
+                .single();
 
-        // ================= SADIK MÜŞTERİ (Index 11 - Pınar) =================
-        [11, -80, "10:30", "completed", [1]],
-        [11, -60, "14:00", "completed", [0]],
-        [11, -40, "11:00", "completed", [0]],
-        [11, -20, "11:00", "completed", [0]],
-        [11, -5, "11:00", "completed", [0]],
+            if (apptErr || !appt) continue;
 
-        // ================= DÜZENLİ ZİYARETÇİ (Index 12 - Deniz) =================
-        [12, -50, "10:30", "completed", [1]],
-        [12, -25, "14:00", "completed", [0]],
-        [12, -2, "11:00", "completed", [0]],
-
-        // ================= YENİ BAŞLANGIÇ (Index 13 - Ece) =================
-        [13, 1, "11:00", "scheduled", [0]], // Sadece yarın randevusu var
-
-        // ================= RİSKLİ (Index 14 - Melis) =================
-        [14, -130, "11:00", "completed", [0]],
-        [14, -95, "11:00", "completed", [0]],
-
-        // ================= DÜZENLİ AMA DÜN NO-SHOW (Index 15 - Buse) =================
-        [15, -60, "11:00", "completed", [0]],
-        [15, -40, "11:00", "completed", [0]],
-        [15, -20, "11:00", "completed", [0]],
-        [15, -1, "10:00", "no_show", [0]],
-
-        // ================= YENİ BAŞLANGIÇ (Index 16 - Hande) =================
-        [16, 5, "13:00", "scheduled", [1]],
-
-        // ================= SADIK MÜŞTERİ (Index 17 - Tuğba) =================
-        [17, -90, "11:00", "completed", [0]],
-        [17, -70, "11:00", "completed", [0]],
-        [17, -50, "11:00", "completed", [0]],
-        [17, -30, "11:00", "completed", [0]],
-        [17, -10, "11:00", "completed", [0]],
-
-        // ===== BUGÜN PLANLANMIŞ EXTRA (Riskli vs listesinde olmayan ama bugün gelen) =====
-        [10, 0, "16:30", "scheduled", [0]],
-    ];
-
-    let totalInserted = 0;
-    for (const apptPlan of appointmentPlans) {
-        // tuple uzunluğunu kontrol edip destructure ediyoruz
-        const custIdx = apptPlan[0] as number;
-        const daysOffset = apptPlan[1] as number;
-        const time = apptPlan[2] as string;
-        const status = apptPlan[3] as string;
-        const serviceIdxList = apptPlan[4] as number[];
-        const customPrice = apptPlan[5] as number | undefined;
-
-        const customer = insertedCustomers[custIdx];
-        if (!customer) continue;
-
-        const srvList = serviceIdxList.map(i => pickService(i));
-        const totalDuration = srvList.reduce((s, sv) => s + (sv.duration_minutes || 60), 0);
-        const totalPrice = customPrice || srvList.reduce((s, sv) => s + (Number(sv.price) || 0), 0);
-
-        const { data: appt, error: apptErr } = await supabase
-            .from("appointments")
-            .insert([{
-                business_id: businessId,
-                customer_id: customer.id,
-                appointment_date: getDateStr(daysOffset),
-                appointment_time: time,
-                status,
-                total_duration_minutes: totalDuration,
-                total_price: totalPrice,
-                notes: null,
-            }])
-            .select("id")
-            .single();
-
-        if (apptErr || !appt) continue;
-
-        const srvInserts = srvList.map(sv => ({
-            appointment_id: appt.id,
-            service_id: sv.id,
-            price_at_booking: customPrice ? Math.round(customPrice / srvList.length) : (Number(sv.price) || 0),
-        }));
-        await supabase.from("appointment_services").insert(srvInserts);
-        totalInserted++;
+            const srvInserts = chosenServices.map(sv => ({
+                appointment_id: appt.id,
+                service_id: sv.id,
+                price_at_booking: Number(sv.price) || 0,
+            }));
+            await supabase.from("appointment_services").insert(srvInserts);
+            totalApptsInserted++;
+        }
     }
 
     return {
         success: true,
-        message: `✅ ${insertedCustomers.length} müşteri ve ${totalInserted} randevu (VIP, Sadık, Riskli vb. AI test verisiyle) başarıyla eklendi!`,
+        message: `✅ ${insertedCustomers.length} müşteri ve ${totalApptsInserted} randevu rastgele dağılımla başarıyla eklendi!`,
     };
 }

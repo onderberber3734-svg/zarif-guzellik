@@ -30,7 +30,7 @@ export async function updateSession(request: NextRequest) {
     );
 
     // Oturumu güncelle
-    await supabase.auth.getUser();
+    const { data } = await supabase.auth.getUser();
 
-    return supabaseResponse;
+    return { response: supabaseResponse, user: data.user };
 }

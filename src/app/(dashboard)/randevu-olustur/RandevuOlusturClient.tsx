@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { getCategoryStyle } from "@/app/(dashboard)/hizmetler/HizmetlerClient";
 import { createAppointment } from "@/app/actions/appointments";
+import CustomerLink from "@/components/CustomerLink";
 
 export default function RandevuOlusturClient({ services, customers }: { services: any[], customers: any[] }) {
     const [selectedServices, setSelectedServices] = useState<any[]>([]);
@@ -113,7 +114,9 @@ export default function RandevuOlusturClient({ services, customers }: { services
                             </div>
                             <div>
                                 <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mb-1">Müşteri</p>
-                                <h4 className="text-2xl font-bold text-slate-900">{selectedCustomer?.first_name} {selectedCustomer?.last_name}</h4>
+                                <h4 className="text-2xl font-bold text-slate-900">
+                                    <CustomerLink id={selectedCustomer?.id} firstName={selectedCustomer?.first_name} lastName={selectedCustomer?.last_name} className="text-inherit hover:text-[var(--color-primary)] transition-colors" />
+                                </h4>
                                 <p className="text-sm text-slate-500">{selectedCustomer?.phone}</p>
                             </div>
                         </div>
@@ -230,7 +233,7 @@ export default function RandevuOlusturClient({ services, customers }: { services
                                     <span className="material-symbols-outlined">person</span>
                                 </div>
                                 <div>
-                                    <p className="text-sm font-bold">{selectedCustomer.first_name} {selectedCustomer.last_name}</p>
+                                    <CustomerLink id={selectedCustomer.id} firstName={selectedCustomer.first_name} lastName={selectedCustomer.last_name} className="text-sm font-bold block" />
                                     <p className="text-xs text-slate-500">{selectedCustomer.phone}</p>
                                 </div>
                             </div>
@@ -414,7 +417,9 @@ export default function RandevuOlusturClient({ services, customers }: { services
                                     </div>
                                     <div>
                                         <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Müşteri</p>
-                                        <h4 className="font-bold text-slate-900">Ayşe Yılmaz</h4>
+                                        <h4 className="font-bold text-slate-900">
+                                            <CustomerLink id={selectedCustomer?.id} firstName={selectedCustomer?.first_name} lastName={selectedCustomer?.last_name} className="text-inherit hover:text-[var(--color-primary)] transition-colors" />
+                                        </h4>
                                     </div>
                                 </div>
 

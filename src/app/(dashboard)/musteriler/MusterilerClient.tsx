@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { MusteriEkleModal } from "@/components/MusteriEkleModal";
 import { addCustomer, updateCustomer, deleteCustomer } from "@/app/actions/customers";
+import CustomerLink from "@/components/CustomerLink";
 
 export default function MusterilerClient({ initialCustomers }: { initialCustomers: any[] }) {
     const [customers, setCustomers] = useState(initialCustomers);
@@ -305,9 +306,12 @@ export default function MusterilerClient({ initialCustomers }: { initialCustomer
                                                         {initials}
                                                     </div>
                                                     <div>
-                                                        <p className="font-extrabold text-[15px] text-slate-900 group-hover:text-[var(--color-primary)] transition-colors">
-                                                            {customer.first_name} {customer.last_name}
-                                                        </p>
+                                                        <CustomerLink
+                                                            id={customer.id}
+                                                            firstName={customer.first_name}
+                                                            lastName={customer.last_name}
+                                                            className="font-extrabold text-[15px] block text-slate-900 group-hover:text-[var(--color-primary)] transition-colors"
+                                                        />
                                                         {isVip && (
                                                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700 mt-1 uppercase tracking-wider">
                                                                 <span className="material-symbols-outlined text-[10px]">diamond</span>VIP

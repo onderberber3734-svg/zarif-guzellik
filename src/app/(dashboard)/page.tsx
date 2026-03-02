@@ -1,5 +1,6 @@
 import { getAppointments } from "@/app/actions/appointments";
 import { getCustomers } from "@/app/actions/customers";
+import CustomerLink from "@/components/CustomerLink";
 
 function getLocalIsoDate(date: Date) {
     const tzOffset = date.getTimezoneOffset() * 60000;
@@ -212,7 +213,7 @@ export default async function DashboardPage() {
                                                 {customer?.first_name?.[0] || ""}{customer?.last_name?.[0] || ""}
                                             </div>
                                             <div className="min-w-0">
-                                                <p className="font-bold text-slate-900 text-[15px] truncate">{customer?.first_name || ""} {customer?.last_name || ""}</p>
+                                                <CustomerLink id={customer?.id} firstName={customer?.first_name || ""} lastName={customer?.last_name || ""} className="font-bold text-slate-900 text-[15px] truncate block" />
                                                 <p className="text-[13px] text-slate-500 truncate mt-0.5 italic">{servicesText}</p>
                                             </div>
                                         </div>

@@ -32,8 +32,8 @@ export default function LoginPage() {
                 <div className="flex justify-center mb-4">
                     <span className="material-symbols-outlined text-[var(--color-primary)] text-5xl">auto_awesome</span>
                 </div>
-                <h2 className="text-4xl font-bold text-slate-900 tracking-tight">Tekrar Hoş Geldiniz</h2>
-                <p className="mt-3 text-sm text-slate-500 font-medium">Salonunuzun durumu bugün harika görünüyor.</p>
+                <h2 className="text-4xl font-bold text-slate-900 tracking-tight">Güzellik Salonu Yönetim Sistemi</h2>
+                <p className="mt-3 text-sm text-slate-500 font-medium">Lütfen paneli görüntülemek için giriş yapın.</p>
             </div>
 
             <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">

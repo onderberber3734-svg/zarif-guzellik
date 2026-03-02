@@ -1,17 +1,26 @@
 "use client";
 
 import { useState } from "react";
-import { createCampaign, updateCampaignStatus, previewCampaignTargets } from "@/app/actions/campaigns";
+import { createCampaign, updateCampaignStatus, previewCampaignTargets, deleteCampaign, updateCampaignDetails, getConvertedTargets } from "@/app/actions/campaigns";
+import CustomerLink from "@/components/CustomerLink";
 
 export default function KampanyalarClient({ initialCampaigns }: { initialCampaigns: any[] }) {
     const [campaigns, setCampaigns] = useState(initialCampaigns);
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
 
     // Stepper State
     const [currentStep, setCurrentStep] = useState(1);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isPreviewLoading, setIsPreviewLoading] = useState(false);
     const [previewData, setPreviewData] = useState<{ count: number; sample: any[] }>({ count: 0, sample: [] });
+    const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
+
+    // Report Modal State
+    const [isReportOpen, setIsReportOpen] = useState(false);
+    const [currentReportCampaign, setCurrentReportCampaign] = useState<any>(null);
+    const [reportData, setReportData] = useState<any[]>([]);
+    const [isReportLoading, setIsReportLoading] = useState(false);
 
     // Kaba Form Stateleri
     const [formData, setFormData] = useState({
@@ -32,22 +41,21 @@ export default function KampanyalarClient({ initialCampaigns }: { initialCampaig
 
     const resetForm = () => {
         setFormData({
-            name: "", description: "", type: "winback", target_segment: "risk", offer_type: "percentage_discount",
-            offer_condition: "Tüm Hizmetlerde", offer_value: "", offer_details: "",
+            name: "", description: "", type: "custom", target_segment: "risk", offer_type: "percentage_discount",
+            offer_condition: "", offer_value: "", offer_details: "",
             start_date: new Date().toISOString().split("T")[0], end_date: "",
             estimated_conversion_count: 0, expected_revenue_impact: 0, channel: ["whatsapp"]
         });
         setCurrentStep(1);
+        setEditingCampaignId(null);
     };
 
     const handleNextStep = async () => {
         if (currentStep === 1) {
             if (!formData.name) return alert("Lütfen kampanya adını giriniz.");
-            setCurrentStep(2);
-        } else if (currentStep === 2) {
-            if (!formData.expected_revenue_impact) return alert("Tahmini ciro hedefini girmelisiniz.");
+            if (!formData.offer_type) return alert("Lütfen teklif türünü seçiniz.");
 
-            // Format offer_details gracefully before moving to step 3
+            // Format offer_details gracefully
             let details = "";
             const cond = formData.offer_condition.trim();
             const val = formData.offer_value.trim();
@@ -60,18 +68,18 @@ export default function KampanyalarClient({ initialCampaigns }: { initialCampaig
                 details = cond ? `${cond} geçerli ₺${val} indirim` : `₺${val} indirim`;
             } else if (formData.offer_type === 'package_upgrade') {
                 details = cond ? `${cond} paketinden ${val} paketine yükseltme` : `${val} yükseltme`;
+            } else if (formData.offer_type === 'bogo') {
+                details = cond ? `${cond} alana ${val} bedava` : `1 Alana 1 Bedava`;
             } else {
                 details = cond ? `${cond} için ${val}` : val;
             }
 
-            setFormData(prev => ({ ...prev, offer_details: details }));
-            setCurrentStep(3);
-        } else if (currentStep === 3) {
-            if (formData.channel.length === 0) return alert("Lütfen en az bir gönderim kanalı seçiniz.");
+            setFormData(prev => ({ ...prev, offer_details: details, type: 'custom' })); // Auto-set type
 
-            // Step 4'e geçerken önizleme verisini çek
+            setCurrentStep(2);
+        } else if (currentStep === 2) {
             setIsPreviewLoading(true);
-            setCurrentStep(4);
+            setCurrentStep(3);
             try {
                 const res = await previewCampaignTargets(formData.target_segment);
                 setPreviewData(res);
@@ -87,17 +95,29 @@ export default function KampanyalarClient({ initialCampaigns }: { initialCampaig
         if (currentStep > 1) setCurrentStep(currentStep - 1);
     };
 
-    const handleCreate = async () => {
+    const handleCreateOrUpdate = async () => {
+        if (formData.channel.length === 0) return alert("Lütfen en az bir gönderim kanalı seçiniz.");
         setIsSubmitting(true);
         try {
-            const res = await createCampaign(formData);
-            if (res.success && res.data) {
-                const newCamp = { ...res.data, estimated_audience_count: res.audienceCount };
-                setCampaigns([newCamp, ...campaigns]);
-                setIsModalOpen(false);
-                resetForm();
+            if (editingCampaignId) {
+                const res = await updateCampaignDetails(editingCampaignId, formData);
+                if (res.success && res.data) {
+                    setCampaigns(campaigns.map(c => c.id === editingCampaignId ? { ...c, ...res.data } : c));
+                    setIsModalOpen(false);
+                    resetForm();
+                } else {
+                    alert("Hata: " + res.error);
+                }
             } else {
-                alert("Hata: " + res.error);
+                const res = await createCampaign(formData);
+                if (res.success && res.data) {
+                    const newCamp = { ...res.data, estimated_audience_count: res.audienceCount };
+                    setCampaigns([newCamp, ...campaigns]);
+                    setIsModalOpen(false);
+                    resetForm();
+                } else {
+                    alert("Hata: " + res.error);
+                }
             }
         } catch (err: any) {
             alert(err.message);
@@ -114,6 +134,42 @@ export default function KampanyalarClient({ initialCampaigns }: { initialCampaig
         }
     };
 
+    const handleDelete = async (id: string) => {
+        if (!confirm("Bu kampanyayı silmek istediğinize emin misiniz?")) return;
+        const res = await deleteCampaign(id);
+        if (res.success) {
+            setCampaigns(campaigns.filter(c => c.id !== id));
+            setOpenDropdownId(null);
+        } else {
+            alert("Silinirken bir hata oluştu: " + res.error);
+        }
+    };
+
+    const handleEdit = (campaign: any) => {
+        setFormData({
+            ...campaign,
+            channel: Array.isArray(campaign.channel) ? campaign.channel : ["whatsapp"]
+        });
+        setEditingCampaignId(campaign.id);
+        setOpenDropdownId(null);
+        setIsModalOpen(true);
+        setCurrentStep(1);
+    };
+
+    const handleOpenReport = async (campaign: any) => {
+        setCurrentReportCampaign(campaign);
+        setIsReportOpen(true);
+        setIsReportLoading(true);
+        try {
+            const data = await getConvertedTargets(campaign.id);
+            setReportData(data);
+        } catch (err) {
+            console.error("Rapor alınamadı", err);
+        } finally {
+            setIsReportLoading(false);
+        }
+    };
+
     // Metrikler
     const totalCampaigns = campaigns.length;
     const activeCampaigns = campaigns.filter(c => c.status === 'active').length;
@@ -125,10 +181,10 @@ export default function KampanyalarClient({ initialCampaigns }: { initialCampaig
         risk: "Riskli (90+ Günlük Kayıp)", new: "Yeni (1 Ziyaret)", loyal: "Sadık (3+ Ziyaret)", vip: "VIP Müşteriler", all: "Tüm Data"
     };
     const channelMap: Record<string, string> = {
-        whatsapp: "WhatsApp", sms: "SMS", email: "E-Posta", push: "Anlık Bildirim", manual: "Manuel Liste (Çağrı)"
+        whatsapp: "WhatsApp", sms: "SMS", email: "E-Posta", push: "Anlık Bildirim", manual: "Manuel Liste"
     };
     const offerMap: Record<string, string> = {
-        percentage_discount: "Yüzde İndirim", fixed_discount: "Sabit İndirim", bundle_offer: "Paket Fırsatı", free_addon: "Hediye Ek Hizmet", package_upgrade: "Paket Yükseltme"
+        percentage_discount: "Yüzde İndirim", fixed_discount: "Sabit İndirim", bundle_offer: "Paket Fırsatı", free_addon: "Hediye Ek Hizmet", package_upgrade: "Paket Yükseltme", bogo: "1 Alana 1 Bedava"
     };
 
     return (
@@ -229,16 +285,34 @@ export default function KampanyalarClient({ initialCampaigns }: { initialCampaig
                         return (
                             <div key={camp.id} className="bg-white border border-slate-200 rounded-[24px] p-6 shadow-sm hover:shadow-lg transition-all flex flex-col relative group">
                                 <div className="flex justify-between items-start mb-4">
-                                    <span className={`inline-flex px-3 py-1 rounded-full text-[10px] uppercase font-extrabold tracking-widest ${statusColor}`}>
-                                        {statusText}
-                                    </span>
-                                    {camp.status !== 'completed' && (
-                                        <button onClick={() => handleStatusToggle(camp.id, camp.status)} className="p-1.5 text-slate-400 hover:text-[var(--color-primary)] hover:bg-purple-50 rounded-lg transition-colors" title={camp.status === 'active' ? "Durdur" : "Başlat"}>
-                                            <span className="material-symbols-outlined text-[18px]">
-                                                {camp.status === 'active' ? 'pause' : 'play_arrow'}
-                                            </span>
+                                    <div className="flex items-center gap-2">
+                                        <span className={`inline-flex px-3 py-1 rounded-full text-[10px] uppercase font-extrabold tracking-widest ${statusColor}`}>
+                                            {statusText}
+                                        </span>
+                                        {camp.status !== 'completed' && (
+                                            <button onClick={() => handleStatusToggle(camp.id, camp.status)} className="p-1.5 text-slate-400 hover:text-[var(--color-primary)] hover:bg-purple-50 rounded-lg transition-colors" title={camp.status === 'active' ? "Durdur" : "Başlat"}>
+                                                <span className="material-symbols-outlined text-[18px]">
+                                                    {camp.status === 'active' ? 'pause' : 'play_arrow'}
+                                                </span>
+                                            </button>
+                                        )}
+                                    </div>
+                                    <div className="relative">
+                                        <button onClick={() => setOpenDropdownId(openDropdownId === camp.id ? null : camp.id)} className="p-1 text-slate-400 hover:text-slate-600 rounded-lg transition-colors">
+                                            <span className="material-symbols-outlined text-[20px]">more_vert</span>
                                         </button>
-                                    )}
+                                        {openDropdownId === camp.id && (
+                                            <div className="absolute right-0 mt-2 w-36 bg-white rounded-xl shadow-xl border border-slate-100 z-10 overflow-hidden text-sm">
+                                                <button onClick={() => handleEdit(camp)} className="w-full text-left px-4 py-2.5 text-slate-700 hover:bg-slate-50 font-semibold flex items-center gap-2">
+                                                    <span className="material-symbols-outlined text-[16px]">edit</span> Düzenle
+                                                </button>
+                                                <div className="h-px bg-slate-100 w-full"></div>
+                                                <button onClick={() => handleDelete(camp.id)} className="w-full text-left px-4 py-2.5 text-rose-600 hover:bg-rose-50 font-semibold flex items-center gap-2">
+                                                    <span className="material-symbols-outlined text-[16px]">delete</span> Sil
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
 
                                 <h4 className="text-[17px] font-extrabold text-slate-900 tracking-tight leading-tight">{camp.name}</h4>
@@ -269,7 +343,7 @@ export default function KampanyalarClient({ initialCampaigns }: { initialCampaig
                                         <span className="truncate">{segmentMap[camp.target_segment] || camp.target_segment}</span>
                                     </div>
 
-                                    {/* Adım Adım Kampanya Süreci */}
+                                    {/* Adım Adım Kampanya Süreci & Rapor */}
                                     <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400 py-1">
                                         <div className="flex items-center gap-1 text-[var(--color-primary)]">
                                             <span className="material-symbols-outlined text-[14px]">check_circle</span> Kitle
@@ -285,16 +359,29 @@ export default function KampanyalarClient({ initialCampaigns }: { initialCampaig
                                         </div>
                                     </div>
 
-                                    <div className="flex justify-between items-center pt-2">
-                                        <div className="flex flex-col">
-                                            <span className="text-[10px] uppercase tracking-wider font-bold text-slate-400">Hedef Ciro</span>
-                                            <span className="text-[14px] font-black text-slate-800">₺{Number(camp.expected_revenue_impact).toLocaleString('tr-TR')}</span>
+                                    <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 flex flex-col gap-2 mt-2">
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-[10px] uppercase tracking-wider font-bold text-slate-500">Dönüşüm / Hedef</span>
+                                            <span className="text-[12px] font-black text-slate-800">{camp.actual_conversion_count || 0} / {camp.estimated_audience_count || 0} Kişi</span>
                                         </div>
-                                        <div className="flex flex-col text-right">
-                                            <span className="text-[10px] uppercase tracking-wider font-bold text-emerald-500">Kazanılan</span>
-                                            <span className="text-[15px] font-black text-emerald-600">₺{Number(camp.actual_revenue_impact).toLocaleString('tr-TR')}</span>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-[10px] uppercase tracking-wider font-bold text-slate-500">Dönüşüm Oranı</span>
+                                            <span className="text-[12px] font-black text-[var(--color-primary)]">
+                                                {camp.estimated_audience_count > 0 ? (((camp.actual_conversion_count || 0) / camp.estimated_audience_count) * 100).toFixed(1) : 0}%
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between items-center pt-2 border-t border-slate-200">
+                                            <span className="text-[10px] uppercase tracking-wider font-bold text-emerald-600">Gerçekleşen Ciro</span>
+                                            <span className="text-[14px] font-black text-emerald-600">₺{Number(camp.actual_revenue_impact || 0).toLocaleString('tr-TR')}</span>
                                         </div>
                                     </div>
+
+                                    {(camp.actual_conversion_count > 0 || camp.status === 'completed') && (
+                                        <button onClick={() => handleOpenReport(camp)} className="mt-2 w-full py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors flex items-center justify-center gap-2">
+                                            <span className="material-symbols-outlined text-[16px]">bar_chart</span>
+                                            Sonuç Raporunu Gör
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         )
@@ -321,7 +408,7 @@ export default function KampanyalarClient({ initialCampaigns }: { initialCampaig
                             {/* Stepper UI */}
                             <div className="flex items-center justify-between relative z-0">
                                 <div className="absolute left-0 top-1/2 -translate-y-1/2 w-full h-1 bg-slate-200 -z-10 rounded-full"></div>
-                                {[1, 2, 3, 4].map(stepNum => {
+                                {[1, 2, 3].map(stepNum => {
                                     const isCompleted = currentStep > stepNum;
                                     const isActive = currentStep === stepNum;
                                     return (
@@ -330,7 +417,7 @@ export default function KampanyalarClient({ initialCampaigns }: { initialCampaig
                                                 {isCompleted ? <span className="material-symbols-outlined text-[16px]">check</span> : stepNum}
                                             </div>
                                             <span className={`text-[10px] font-bold uppercase tracking-widest ${isActive ? 'text-[var(--color-primary)]' : 'text-slate-400'}`}>
-                                                {stepNum === 1 ? 'Amaç & Hedef' : stepNum === 2 ? 'Teklif' : stepNum === 3 ? 'Kanal' : 'Önizleme'}
+                                                {stepNum === 1 ? 'Teklif' : stepNum === 2 ? 'Kitle' : 'Kanal'}
                                             </span>
                                         </div>
                                     )
@@ -341,136 +428,129 @@ export default function KampanyalarClient({ initialCampaigns }: { initialCampaig
                         {/* Scrollable Form Content */}
                         <div className="p-8 overflow-y-auto flex-1 bg-white">
 
-                            {/* STEP 1: AMAÇ VE HEDEF KİTLE */}
+                            {/* STEP 1: TEKLİFİ OLUŞTUR */}
                             {currentStep === 1 && (
                                 <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
                                     <h4 className="font-extrabold text-slate-800 text-lg flex items-center gap-2">
-                                        <span className="material-symbols-outlined text-[var(--color-primary)]">flag</span>
-                                        1. Kampanyanın Amacı ve Kitlesi
+                                        <span className="material-symbols-outlined text-[var(--color-primary)]">local_offer</span>
+                                        1. Teklifi Oluştur
                                     </h4>
-                                    <p className="text-sm text-slate-500 font-medium">Önce genel hedefimizi ve kimlere ulaşacağımızı(Kural Motoru) belirliyoruz.</p>
+                                    <p className="text-sm text-slate-500 font-medium">Kampanyanızın içeriğini ve müşterilere sunacağınız fırsatı belirleyin.</p>
 
                                     <div>
                                         <label className="block text-[12px] font-bold text-slate-700 uppercase tracking-widest mb-2">KAMPANYA ADI</label>
-                                        <input required type="text" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:border-[var(--color-primary)] transition-all text-sm font-bold" placeholder="Örn: 90 Günlük Kayıp Müşterileri Geri Döndür" />
-                                    </div>
-
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                                        <div>
-                                            <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-widest mb-1.5">KAMPANYA TİPİ</label>
-                                            <select value={formData.type} onChange={e => setFormData({ ...formData, type: e.target.value })} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:border-[var(--color-primary)] transition-all text-sm font-bold">
-                                                <option value="winback">Geri Kazanım (Winback)</option>
-                                                <option value="vip_offer">VIP Özel Teklif</option>
-                                                <option value="repeat_visit">Tekrar Ziyaret (Retention)</option>
-                                                <option value="loyalty_upgrade">Paket Yükseltme Oluşturma</option>
-                                                <option value="custom">Özel Kampanya</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-widest mb-1.5">HEDEF KİTLE SEÇİMİ</label>
-                                            <select value={formData.target_segment} onChange={e => setFormData({ ...formData, target_segment: e.target.value })} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:border-[var(--color-primary)] transition-all text-sm font-bold">
-                                                <option value="risk">Riskli Müşteriler (90 Gündür Gelmeyenler)</option>
-                                                <option value="new">Yeni Müşteriler (Sadece 1 Kere Gelenler)</option>
-                                                <option value="loyal">Sadık Müşteriler (En Az 3 Kere Gelenler)</option>
-                                                <option value="vip">Sadece VIP Müşteriler</option>
-                                                <option value="all">Sistemdeki Tüm Müşteriler</option>
-                                            </select>
-                                        </div>
+                                        <input required type="text" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:border-[var(--color-primary)] transition-all text-sm font-bold" placeholder="Örn: Hafta Sonu Fırsatı" />
                                     </div>
 
                                     <div>
-                                        <label className="block text-[12px] font-bold text-slate-700 uppercase tracking-widest mb-2">TANIM / NOTLAR (OPSİYONEL)</label>
-                                        <textarea value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:border-[var(--color-primary)] transition-all text-sm font-medium min-h-[80px]" placeholder="Kampanya stratejisini buraya yazabilirsiniz..." />
+                                        <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-widest mb-1.5">KAMPANYA TİPİ (TEKLİF)</label>
+                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                            {[
+                                                { id: 'percentage_discount', label: 'Yüzde İndirim', icon: 'percent' },
+                                                { id: 'fixed_discount', label: 'Tutar İndirimi', icon: 'payments' },
+                                                { id: 'bogo', label: '1 Alana 1 Bedava', icon: 'exposure_plus_1' },
+                                                { id: 'free_addon', label: 'Ücretsiz Ek Hizmet', icon: 'redeem' },
+                                                { id: 'bundle_offer', label: 'Paket Teklifi', icon: 'inventory_2' }
+                                            ].map(opt => (
+                                                <button
+                                                    key={opt.id}
+                                                    type="button"
+                                                    onClick={() => setFormData({ ...formData, offer_type: opt.id, offer_condition: '', offer_value: '' })}
+                                                    className={`p-4 rounded-xl border text-left transition-all flex flex-col gap-2 ${formData.offer_type === opt.id ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/5 shadow-sm ring-1 ring-[var(--color-primary)]' : 'border-slate-200 bg-white hover:border-slate-300'}`}
+                                                >
+                                                    <span className={`material-symbols-outlined ${formData.offer_type === opt.id ? 'text-[var(--color-primary)]' : 'text-slate-400'}`}>{opt.icon}</span>
+                                                    <span className={`font-bold text-sm ${formData.offer_type === opt.id ? 'text-[var(--color-primary)]' : 'text-slate-700'}`}>{opt.label}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* DİNAMİK ALANLAR */}
+                                    <div className="bg-slate-50 border border-slate-200 p-5 rounded-2xl mt-4">
+
+                                        {/* YÜZDE VEYA TUTAR İNDİRİMİ */}
+                                        {(formData.offer_type === 'percentage_discount' || formData.offer_type === 'fixed_discount') && (
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                                                <div className="space-y-1.5">
+                                                    <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-widest">GEÇERLİ OLDUĞU HİZMET (OPSİYONEL)</label>
+                                                    <input type="text" value={formData.offer_condition} onChange={e => setFormData({ ...formData, offer_condition: e.target.value })} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold" placeholder="Örn: Lazer Epilasyon veya boş bırakın" />
+                                                </div>
+                                                <div className="space-y-1.5">
+                                                    <label className="block text-[11px] font-bold text-[var(--color-primary)] uppercase tracking-widest">İNDİRİM {formData.offer_type === 'percentage_discount' ? 'ORANI' : 'TUTARI'}</label>
+                                                    <div className="relative">
+                                                        {formData.offer_type === 'percentage_discount' && <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-[var(--color-primary)]">%</span>}
+                                                        {formData.offer_type === 'fixed_discount' && <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-[var(--color-primary)]">₺</span>}
+                                                        <input type="number" value={formData.offer_value} onChange={e => setFormData({ ...formData, offer_value: e.target.value })} className="w-full pl-8 pr-4 py-3 bg-white border border-[var(--color-primary)]/30 rounded-xl focus:ring-2 focus:ring-[var(--color-primary)] border-[var(--color-primary)] font-bold text-[var(--color-primary)]" placeholder={formData.offer_type === 'percentage_discount' ? '20' : '150'} />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* 1 ALANA 1 BEDAVA VEYA ÜCRETSİZ EK HİZMET */}
+                                        {(formData.offer_type === 'bogo' || formData.offer_type === 'free_addon') && (
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                                                <div className="space-y-1.5">
+                                                    <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-widest">{formData.offer_type === 'bogo' ? 'ALINACAK HİZMET' : 'ANA HİZMET'}</label>
+                                                    <input type="text" value={formData.offer_condition} onChange={e => setFormData({ ...formData, offer_condition: e.target.value })} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold" placeholder="Örn: Cilt Bakımı" />
+                                                </div>
+                                                <div className="space-y-1.5">
+                                                    <label className="block text-[11px] font-bold text-emerald-600 uppercase tracking-widest">{formData.offer_type === 'bogo' ? 'BEDAVA VERİLECEK HİZMET' : 'HEDİYE HİZMET'}</label>
+                                                    <input type="text" value={formData.offer_value} onChange={e => setFormData({ ...formData, offer_value: e.target.value })} className="w-full px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-xl text-sm font-bold text-emerald-800" placeholder="Örn: Koltuk Altı Lazer" />
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* PAKET TEKLİFİ */}
+                                        {(formData.offer_type === 'bundle_offer' || formData.offer_type === 'package_upgrade') && (
+                                            <div className="space-y-1.5">
+                                                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-widest">PAKET İÇERİĞİ / TEKLİF DETAYI</label>
+                                                <textarea value={formData.offer_value} onChange={e => setFormData({ ...formData, offer_value: e.target.value })} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold min-h-[80px]" placeholder="Örn: 3 Seans Lazer + 1 Cilt Bakımı sadece 2000 TL" />
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             )}
 
-                            {/* STEP 2: TEKLİF İÇERİĞİ */}
+                            {/* STEP 2: HEDEF KİTLEYİ SEÇ */}
                             {currentStep === 2 && (
                                 <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
                                     <h4 className="font-extrabold text-slate-800 text-lg flex items-center gap-2">
-                                        <span className="material-symbols-outlined text-[var(--color-primary)]">local_offer</span>
-                                        2. Teklif ve Ciro Hedefleri
+                                        <span className="material-symbols-outlined text-[var(--color-primary)]">group_add</span>
+                                        2. Hedef Kitleyi Seç
                                     </h4>
-                                    <p className="text-sm text-slate-500 font-medium">Müşteriye ne sunacağımızı ve bu kampanyadan tahmini ne kadar gelir beklediğimizi girin.</p>
+                                    <p className="text-sm text-slate-500 font-medium">Bu kampanyanın hangi müşteri segmentine ulaşmasını istiyorsunuz?</p>
 
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                                        <div>
-                                            <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-widest mb-1.5">TEKLİF TÜRÜ</label>
-                                            <select value={formData.offer_type} onChange={e => setFormData({ ...formData, offer_type: e.target.value, offer_condition: e.target.value === 'free_addon' ? '' : 'Tüm Hizmetlerde', offer_value: '' })} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:border-[var(--color-primary)] transition-all text-sm font-bold">
-                                                <option value="percentage_discount">Yüzde İndirim (%15 vb.)</option>
-                                                <option value="fixed_discount">Sabit İndirim (₺150 vb.)</option>
-                                                <option value="free_addon">Ücretsiz Ek Hizmet "X alana Y bedava"</option>
-                                                <option value="bundle_offer">Çoklu Paket Fırsatı</option>
-                                                <option value="package_upgrade">Üst Pakete Geçiş İndirimi</option>
-                                            </select>
-                                        </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        {[
+                                            { id: 'vip', label: 'VIP Müşteriler', desc: 'Sadece en çok harcama yapanlar' },
+                                            { id: 'risk', label: 'Riskli (Gelmeyenler)', desc: 'Uzun süredir randevu almayanlar' },
+                                            { id: 'new', label: 'Yeni Müşteriler', desc: 'Sadece tek ziyaret yapanlar' },
+                                            { id: 'loyal', label: 'Sadık Müşteriler', desc: 'Düzenli gelen müşteriler' },
+                                            { id: 'all', label: 'Tüm Müşteriler', desc: 'Sistemdeki herkes' }
+                                        ].map(seg => (
+                                            <button
+                                                key={seg.id} type="button"
+                                                onClick={() => {
+                                                    setFormData({ ...formData, target_segment: seg.id });
+                                                    // Immediately trigger a preview load when segment changes in step 2
+                                                    previewCampaignTargets(seg.id).then(res => setPreviewData(res));
+                                                }}
+                                                className={`p-4 rounded-xl border text-left transition-all ${formData.target_segment === seg.id ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/5 shadow-sm ring-1 ring-[var(--color-primary)]' : 'border-slate-200 bg-white hover:border-slate-300'}`}
+                                            >
+                                                <h5 className={`font-bold ${formData.target_segment === seg.id ? 'text-[var(--color-primary)]' : 'text-slate-800'}`}>{seg.label}</h5>
+                                                <p className="text-[11px] text-slate-500 mt-1">{seg.desc}</p>
+                                            </button>
+                                        ))}
                                     </div>
 
-                                    {/* DINAMIK İKİLİ (ŞART VE SONUÇ) TEKLİF YARATICI */}
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5 bg-slate-50 border border-slate-200 p-5 rounded-2xl">
-                                        <div className="space-y-1.5">
-                                            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1">
-                                                <span className="material-symbols-outlined text-[14px]">conditions</span>
-                                                {formData.offer_type === 'free_addon' ? 'HANGİ HİZMETİ ALANA?' : formData.offer_type === 'package_upgrade' ? 'MEVCUT PAKETİ (ŞU ANKİ)' : 'HANGİ HİZMETLERDE GEÇERLİ?'}
-                                            </label>
-                                            <input
-                                                type="text"
-                                                value={formData.offer_condition}
-                                                onChange={e => setFormData({ ...formData, offer_condition: e.target.value })}
-                                                className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:border-[var(--color-primary)] transition-all text-sm font-bold text-slate-700"
-                                                placeholder={formData.offer_type === 'free_addon' ? 'Örn: Lazer Epilasyon' : 'Örn: Tüm Hizmetlerde'}
-                                            />
-                                        </div>
-
-                                        <div className="space-y-1.5 relative">
-                                            <label className="block text-[11px] font-bold text-[var(--color-primary)] uppercase tracking-widest flex items-center gap-1">
-                                                <span className="material-symbols-outlined text-[14px]">redeem</span>
-                                                {formData.offer_type === 'free_addon' ? 'NE ÜCRETSİZ/HEDİYE VERİLECEK?' : formData.offer_type === 'package_upgrade' ? 'HANGİ PAKETE YÜKSELTİLECEK?' : 'İNDİRİM VEYA TEKLİF MİKTARI'}
-                                            </label>
-                                            <div className="relative">
-                                                {formData.offer_type === 'percentage_discount' && <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--color-primary)] font-bold">%</span>}
-                                                {formData.offer_type === 'fixed_discount' && <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--color-primary)] font-bold">₺</span>}
-                                                <input
-                                                    type={formData.offer_type.includes('discount') ? "number" : "text"}
-                                                    value={formData.offer_value}
-                                                    onChange={e => setFormData({ ...formData, offer_value: e.target.value })}
-                                                    className={`w-full ${formData.offer_type.includes('discount') ? 'pl-8' : 'px-4'} py-3 bg-white border border-[var(--color-primary)]/30 rounded-xl focus:ring-2 focus:ring-[var(--color-primary)] border-[var(--color-primary)] transition-all text-sm font-bold text-[var(--color-primary)] shadow-sm shadow-[var(--color-primary)]/5`}
-                                                    placeholder={
-                                                        formData.offer_type === 'percentage_discount' ? 'Örn: 20' :
-                                                            formData.offer_type === 'fixed_discount' ? 'Örn: 250' :
-                                                                formData.offer_type === 'free_addon' ? 'Örn: Kaş Alımı' : 'Paket veya Teklif adı yazın'
-                                                    }
-                                                />
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div className="flex gap-4">
-                                        <div className="flex-1">
-                                            <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-widest mb-1.5">KAMANYA BAŞLANGIÇ</label>
-                                            <input type="date" value={formData.start_date} onChange={e => setFormData({ ...formData, start_date: e.target.value })} className="w-full px-3 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium" />
-                                        </div>
-                                        <div className="flex-1">
-                                            <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-widest mb-1.5">KAMPANYA BİTİŞ</label>
-                                            <input type="date" value={formData.end_date} onChange={e => setFormData({ ...formData, end_date: e.target.value })} className="w-full px-3 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium" />
-                                        </div>
-                                    </div>
-
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-[var(--color-primary)]/5 p-5 border border-[var(--color-primary)]/10 rounded-2xl">
+                                    {/* Basit Önizleme Kutusu */}
+                                    <div className="mt-6 bg-slate-50 rounded-2xl p-5 border border-slate-200 flex items-center justify-between">
                                         <div>
-                                            <label className="block text-[11px] font-bold text-[var(--color-primary)] uppercase tracking-widest mb-2">HEDEFLENEN TOPLAM CİRO TAHMİNİ</label>
-                                            <div className="relative">
-                                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--color-primary)] font-extrabold">₺</span>
-                                                <input type="number" value={formData.expected_revenue_impact || ""} onChange={e => setFormData({ ...formData, expected_revenue_impact: parseInt(e.target.value) || 0 })} className="w-full pl-9 pr-4 py-3 bg-white border border-[var(--color-primary)]/20 rounded-xl focus:ring-[var(--color-primary)] font-bold text-[var(--color-primary)]" placeholder="15000" />
-                                            </div>
+                                            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">TAHMİNİ ULAŞILACAK KİŞİ</p>
+                                            <p className="text-sm text-slate-600 mt-0.5">Seçilen segmente göre otomatik hesaplanıyor.</p>
                                         </div>
-                                        <div>
-                                            <label className="block text-[11px] font-bold text-[var(--color-primary)] uppercase tracking-widest mb-2">BEKLENEN TOPLAM DÖNÜŞÜM</label>
-                                            <div className="relative">
-                                                <input type="number" value={formData.estimated_conversion_count || ""} onChange={e => setFormData({ ...formData, estimated_conversion_count: parseInt(e.target.value) || 0 })} className="w-full pl-4 pr-10 py-3 bg-white border border-[var(--color-primary)]/20 rounded-xl focus:ring-[var(--color-primary)] font-bold text-[var(--color-primary)]" placeholder="10" />
-                                                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[var(--color-primary)] font-medium text-sm">Kişi</span>
-                                            </div>
+                                        <div className="bg-white px-4 py-2 rounded-xl shadow-sm border border-slate-100 font-black text-2xl text-[var(--color-primary)]">
+                                            {previewData.count} <span className="text-sm font-bold text-slate-400">kişi</span>
                                         </div>
                                     </div>
                                 </div>
@@ -507,99 +587,39 @@ export default function KampanyalarClient({ initialCampaigns }: { initialCampaig
                                                     </div>
                                                     <div>
                                                         <h5 className={`font-bold ${isSelected ? 'text-[var(--color-primary)]' : 'text-slate-700'}`}>{label}</h5>
-                                                        <p className="text-[11px] text-slate-400 mt-0.5 tracking-wide">
-                                                            {key === 'manual' ? 'Asistanlar listeyi arayacak' : 'Otomatik API Gönderimi'}
-                                                        </p>
                                                     </div>
                                                 </button>
                                             )
                                         })}
                                     </div>
 
-                                    {formData.channel.some(ch => ['whatsapp', 'sms', 'email', 'push'].includes(ch)) && (
-                                        <div className="mt-8 p-5 bg-amber-50 border border-amber-200 rounded-2xl flex gap-4 items-start">
-                                            <span className="material-symbols-outlined text-amber-500 text-2xl mt-0.5">info</span>
+                                    {/* Basit Özet Kartı */}
+                                    <div className="bg-slate-800 text-white rounded-2xl p-6 mt-6 shadow-xl relative overflow-hidden">
+                                        <div className="absolute right-0 top-0 opacity-10">
+                                            <span className="material-symbols-outlined text-9xl">campaign</span>
+                                        </div>
+                                        <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest mb-1">KAMPANYA ÖZETİ</p>
+                                        <h3 className="text-2xl font-black mb-4 relative z-10">{formData.name}</h3>
+
+                                        <div className="grid grid-cols-2 gap-4 relative z-10 text-sm">
                                             <div>
-                                                <h5 className="font-bold text-amber-800 text-[15px]">Entegrasyon Önümüzdeki Fazda Aktifleşecektir</h5>
-                                                <p className="text-sm text-amber-700/80 mt-1 leading-relaxed">
-                                                    Şu an için seçtiğiniz dijital kanalların entegrasyonu sistemde kilitlidir. Kampanyayı onayladığınızda hedef müşteri listeniz sistemde hazırlanıp kilitlenecek ve <strong>"Entegrasyon Bekliyor"</strong> durumuna geçecektir.
-                                                </p>
+                                                <p className="text-slate-400 text-[10px] font-bold tracking-widest uppercase mb-1">TEKLİF</p>
+                                                <p className="font-medium">{formData.offer_details || "Belirlenmedi"}</p>
                                             </div>
-                                        </div>
-                                    )}
-
-                                    {formData.channel.includes('manual') && (
-                                        <div className="mt-8 p-5 bg-blue-50 border border-blue-200 rounded-2xl flex gap-4 items-start">
-                                            <span className="material-symbols-outlined text-blue-500 text-2xl mt-0.5">task_alt</span>
                                             <div>
-                                                <h5 className="font-bold text-blue-800 text-[15px]">Manuel Liste / Arama Kampanyası Başlıyor</h5>
-                                                <p className="text-sm text-blue-700/80 mt-1 leading-relaxed">
-                                                    Kampanya oluşturulduğunda sistem anında size bir arama listesi çıkarır. Gönderim durumu <strong>"Liste Hazır"</strong> olarak ayarlanır ve dilerseniz müşterileri kendiniz arayarak dönüşüm girebilirsiniz.
-                                                </p>
+                                                <p className="text-slate-400 text-[10px] font-bold tracking-widest uppercase mb-1">KİTLE</p>
+                                                <p className="font-medium">{segmentMap[formData.target_segment]}</p>
                                             </div>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            {/* STEP 4: ÖNİZLEME VE ONAY */}
-                            {currentStep === 4 && (
-                                <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
-                                    <h4 className="font-extrabold text-slate-800 text-lg flex items-center gap-2">
-                                        <span className="material-symbols-outlined text-emerald-500">task_alt</span>
-                                        4. Önizleme ve Doğrulama
-                                    </h4>
-
-                                    {isPreviewLoading ? (
-                                        <div className="py-20 flex flex-col items-center justify-center text-slate-400 gap-4">
-                                            <div className="w-8 h-8 rounded-full border-4 border-slate-200 border-t-[var(--color-primary)] animate-spin"></div>
-                                            <p className="font-bold text-sm tracking-wide">Kural motoru veritabanını tarıyor...</p>
-                                        </div>
-                                    ) : (
-                                        <div className="space-y-6">
-                                            {/* Gerçek zamanlı müşteri sayımı */}
-                                            <div className="bg-emerald-500 rounded-2xl p-6 text-white text-center shadow-lg shadow-emerald-500/20">
-                                                <p className="text-emerald-100 font-bold tracking-widest text-[11px] mb-1">KURAL MOTORU BULGULAMASI (SNAPSHOT)</p>
-                                                <h2 className="text-5xl font-black mb-1">{previewData.count} <span className="text-lg font-bold opacity-80">Müşteri</span></h2>
-                                                <p className="text-emerald-100 text-sm">hedef kitle filtresiyle eşleşti ve kampanya listesine eklenecek.</p>
-                                            </div>
-
-                                            <div className="grid grid-cols-2 gap-4 bg-slate-50 p-6 rounded-2xl border border-slate-100">
-                                                <div>
-                                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">KAMPANYA</p>
-                                                    <p className="font-bold text-slate-800">{formData.name}</p>
-                                                </div>
-                                                <div>
-                                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">HEDEF SEGMENT</p>
-                                                    <p className="font-bold text-[var(--color-primary)]">{segmentMap[formData.target_segment]}</p>
-                                                </div>
-                                                <div className="col-span-2">
-                                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">TEKLİF ÖZETİ</p>
-                                                    <p className="font-bold text-slate-800 text-lg flex items-center gap-2 mt-1">
-                                                        <span className="material-symbols-outlined text-[var(--color-primary)]">sell</span>
-                                                        {formData.offer_details}
-                                                    </p>
-                                                </div>
-                                                <div className="col-span-2">
-                                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">GÖNDERİM KANALLARI</p>
-                                                    <div className="flex flex-wrap gap-1 mt-1">
-                                                        {formData.channel.map(ch => (
-                                                            <span key={ch} className="font-bold text-blue-600 flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded textxs">
-                                                                <span className="material-symbols-outlined text-[14px]">
-                                                                    {ch === 'whatsapp' ? 'forum' : ch === 'sms' ? 'sms' : ch === 'email' ? 'mail' : ch === 'push' ? 'notifications' : 'list_alt'}
-                                                                </span>
-                                                                {channelMap[ch]}
-                                                            </span>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                                <div className="col-span-2 mt-2 pt-4 border-t border-slate-200">
-                                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">HEDEFLENEN CİRO ETKİSİ</p>
-                                                    <p className="text-xl font-black text-emerald-600">₺{formData.expected_revenue_impact.toLocaleString("tr-TR")}</p>
+                                            <div className="col-span-2 mt-2 pt-4 border-t border-slate-700/50">
+                                                <p className="text-slate-400 text-[10px] font-bold tracking-widest uppercase mb-2">KANALLAR</p>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {formData.channel.length > 0 ? formData.channel.map(ch => (
+                                                        <span key={ch} className="bg-slate-700 px-3 py-1 rounded-full text-xs font-bold">{channelMap[ch]}</span>
+                                                    )) : <span className="text-rose-400 font-bold text-sm">Kanal Seçilmedi</span>}
                                                 </div>
                                             </div>
                                         </div>
-                                    )}
+                                    </div>
                                 </div>
                             )}
 
@@ -615,15 +635,96 @@ export default function KampanyalarClient({ initialCampaigns }: { initialCampaig
                                 <div></div>
                             )}
 
-                            {currentStep < 4 ? (
+                            {currentStep < 3 ? (
                                 <button type="button" onClick={handleNextStep} className="px-8 py-2.5 bg-slate-800 text-white font-bold rounded-xl shadow-lg hover:bg-slate-900 transition-all text-sm flex items-center gap-2">
                                     Devam Et <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
                                 </button>
                             ) : (
-                                <button type="button" onClick={handleCreate} disabled={isSubmitting || isPreviewLoading} className="px-8 py-2.5 bg-[var(--color-primary)] text-white font-bold rounded-xl shadow-lg shadow-purple-500/20 hover:opacity-90 active:scale-95 transition-all text-sm flex items-center gap-2">
-                                    {isSubmitting ? "Kampanya Onaylanıyor..." : "Onayla ve Kampanyayı Başlat"}
-                                    {!isSubmitting && <span className="material-symbols-outlined text-[18px]">rocket_launch</span>}
+                                <button type="button" onClick={handleCreateOrUpdate} disabled={isSubmitting || isPreviewLoading} className="px-8 py-2.5 bg-[var(--color-primary)] text-white font-bold rounded-xl shadow-lg shadow-purple-500/20 hover:opacity-90 active:scale-95 transition-all text-sm flex items-center gap-2">
+                                    {isSubmitting ? (editingCampaignId ? "Güncelleniyor..." : "Oluşturuluyor...") : (editingCampaignId ? "Değişiklikleri Kaydet" : "Kampanyayı Oluştur")}
+                                    {!isSubmitting && <span className="material-symbols-outlined text-[18px]">{editingCampaignId ? 'save' : 'rocket_launch'}</span>}
                                 </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Rapor Modalı */}
+            {isReportOpen && currentReportCampaign && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">
+                    <div className="bg-white rounded-[32px] w-full max-w-2xl shadow-2xl overflow-hidden my-8 scale-100 animate-in zoom-in-95 duration-200">
+                        <div className="px-8 py-6 border-b border-slate-100 bg-slate-50 flexItems-center justify-between">
+                            <div>
+                                <h3 className="text-xl font-extrabold text-slate-900 flex items-center gap-2">
+                                    <span className="material-symbols-outlined text-[var(--color-primary)]">bar_chart</span>
+                                    Kampanya Sonuç Raporu
+                                </h3>
+                                <p className="text-sm text-slate-500 font-medium mt-1">{currentReportCampaign.name}</p>
+                            </div>
+                            <button onClick={() => setIsReportOpen(false)} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-all">
+                                <span className="material-symbols-outlined">close</span>
+                            </button>
+                        </div>
+
+                        <div className="p-8">
+                            <div className="grid grid-cols-3 gap-4 mb-8">
+                                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
+                                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Hedef Kitle</p>
+                                    <p className="text-2xl font-black text-slate-800">{currentReportCampaign.estimated_audience_count}</p>
+                                </div>
+                                <div className="bg-purple-50 p-4 rounded-2xl border border-purple-100 text-center">
+                                    <p className="text-[10px] font-bold text-[var(--color-primary)] uppercase tracking-widest mb-1">Dönüşüm</p>
+                                    <p className="text-2xl font-black text-[var(--color-primary)]">{currentReportCampaign.actual_conversion_count}</p>
+                                </div>
+                                <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100 text-center">
+                                    <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mb-1">Kazanılan Ciro</p>
+                                    <p className="text-2xl font-black text-emerald-600">₺{Number(currentReportCampaign.actual_revenue_impact || 0).toLocaleString('tr-TR')}</p>
+                                </div>
+                            </div>
+
+                            <h4 className="text-sm font-bold text-slate-800 uppercase tracking-widest mb-4">Dönüşüm Yapan Müşteriler</h4>
+
+                            {isReportLoading ? (
+                                <div className="py-12 flex justify-center">
+                                    <div className="w-8 h-8 rounded-full border-4 border-slate-200 border-t-[var(--color-primary)] animate-spin"></div>
+                                </div>
+                            ) : reportData.length === 0 ? (
+                                <div className="py-12 text-center text-slate-500 bg-slate-50 rounded-2xl border border-slate-100 border-dashed">
+                                    <span className="material-symbols-outlined text-4xl mb-2 opacity-50">mood_bad</span>
+                                    <p className="font-medium text-sm">Henüz bu kampanyadan dönüş yapan müşteri bulunmuyor.</p>
+                                </div>
+                            ) : (
+                                <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                                    <table className="w-full text-left border-collapse bg-white">
+                                        <thead>
+                                            <tr className="bg-slate-50 text-[11px] uppercase tracking-widest text-slate-500 font-bold border-b border-slate-200">
+                                                <th className="p-4 px-5">Müşteri</th>
+                                                <th className="p-4 px-5">Telefon</th>
+                                                <th className="p-4 px-5">Dönüşüm Tarihi</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="text-sm">
+                                            {reportData.map((row: any) => (
+                                                <tr key={row.id} className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors">
+                                                    <td className="p-4 px-5 font-bold text-slate-800">
+                                                        <CustomerLink
+                                                            id={row.customer_id}
+                                                            firstName={row.customers?.first_name}
+                                                            lastName={row.customers?.last_name}
+                                                        />
+                                                    </td>
+                                                    <td className="p-4 px-5 text-slate-600 font-medium">
+                                                        {row.customers?.phone}
+                                                    </td>
+                                                    <td className="p-4 px-5 text-slate-500">
+                                                        {row.converted_at ? new Date(row.converted_at).toLocaleDateString('tr-TR') : '-'}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
                             )}
                         </div>
                     </div>
