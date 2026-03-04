@@ -580,6 +580,15 @@ function AppointmentCard({ appt, isToday = false, startTransition, liveTime }: {
                     </div>
 
                     <div className="flex items-center gap-2.5 mt-2 flex-wrap text-sm">
+                        {appt.salons && (
+                            <>
+                                <span className="flex items-center gap-1 font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">
+                                    <div className="size-2 rounded-full" style={{ backgroundColor: appt.salons.color_code || '#805ad5' }}></div>
+                                    {appt.salons.name}
+                                </span>
+                                <span className="size-1 bg-slate-300 rounded-full shrink-0"></span>
+                            </>
+                        )}
                         <span className="text-slate-500 italic max-w-xs truncate">{servicesText}</span>
                         <span className="size-1 bg-slate-300 rounded-full shrink-0"></span>
                         <span className="font-extrabold text-emerald-600">₺{appt.total_price}</span>

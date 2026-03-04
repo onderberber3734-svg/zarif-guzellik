@@ -5,15 +5,20 @@ import { getCategoryStyle } from "@/app/(dashboard)/hizmetler/HizmetlerClient";
 import { createAppointment } from "@/app/actions/appointments";
 import CustomerLink from "@/components/CustomerLink";
 
-export default function RandevuOlusturClient({ services, customers }: { services: any[], customers: any[] }) {
+export default function RandevuOlusturClient({ services, customers, appointments = [], salons = [] }: { services: any[], customers: any[], appointments?: any[], salons?: any[] }) {
     const [selectedServices, setSelectedServices] = useState<any[]>([]);
     const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
+    const [selectedSalon, setSelectedSalon] = useState<any>(null);
     const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
     const today = new Date();
     const [selectedDate, setSelectedDate] = useState<number | null>(today.getDate());
     const [selectedTime, setSelectedTime] = useState<string | null>("10:30");
     const [isSuccess, setIsSuccess] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
+
+    const isStep2Unlocked = !!selectedCustomer;
+    const isStep3Unlocked = isStep2Unlocked && selectedServices.length > 0;
+    const isStep4Unlocked = isStep3Unlocked && !!selectedDate && !!selectedTime;
 
     const next7Days = Array.from({ length: 7 }, (_, i) => {
         const d = new Date();
@@ -50,20 +55,120 @@ export default function RandevuOlusturClient({ services, customers }: { services
         endTimeStr = `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
     }
 
+    // Seçili tarihin dize karşılığını hesapla
+    const selectedDateObj = next7Days.find(d => d.getDate() === selectedDate) || today;
+    const year = selectedDateObj.getFullYear();
+    const month = String(selectedDateObj.getMonth() + 1).padStart(2, '0');
+    const day = String(selectedDateObj.getDate()).padStart(2, '0');
+    const appointmentDateStr = `${year}-${month}-${day}`;
+
+    // Seçili gündeki mevcut randevuları filtrele
+    const appointmentsOnSelectedDate = (appointments || []).filter(a =>
+        a.appointment_date === appointmentDateStr &&
+        a.status !== 'canceled' // İptal edilenler uygun slotları kapatmasın
+    );
+
+    // Saatleri dakikaya çeviren yardımcı fonksiyon
+    const timeToMinutes = (timeStr: string) => {
+        const [h, m] = timeStr.split(':').map(Number);
+        return h * 60 + m;
+    };
+
+    const validSalons = salons.filter((s: any) => {
+        if (!s.is_active) return false;
+        if (selectedServices.length === 0) return true;
+        const supportedIds = s.salon_services?.map((ss: any) => ss.service_id) || [];
+        return selectedServices.every((srv: any) => supportedIds.includes(srv.id));
+    });
+
+    const unassignedSelectedServices = selectedServices.filter(service =>
+        !salons.some((salon: any) =>
+            salon.is_active && salon.salon_services?.some((ss: any) => ss.service_id === service.id)
+        )
+    );
+
+    // Olası saat dilimlerini oluştur ve çakışmaları hesapla
+    const availableSlots = (() => {
+        const slots = [];
+        for (let h = 9; h <= 19; h++) {
+            for (let m = 0; m < 60; m += 30) {
+                // Sadece son saati aşmamak
+                if (h === 19 && m > 0) continue;
+
+                const timeStr = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+
+                // Seçilen hizmetlerin süresine göre bitiş saati
+                const slotStart = h * 60 + m;
+                const reqDuration = totalDuration > 0 ? totalDuration : 30; // Eğer henüz hizmet seçilmediyse 30dk varsayılır
+                const slotEnd = slotStart + reqDuration;
+
+                const isOverlapping = (() => {
+                    if (validSalons.length === 0) return true; // Bu hizmetleri destekleyen salon yok
+
+                    // Bu slot aralığında dolu olan salon_id'lerini topla
+                    const occupiedSalonIdsForThisSlot = appointmentsOnSelectedDate
+                        .filter((appt: any) => {
+                            const apptStart = timeToMinutes(appt.appointment_time);
+                            const apptDuration = appt.total_duration_minutes || 0;
+                            const apptEnd = apptStart + apptDuration;
+
+                            const overStart = Math.max(slotStart, apptStart);
+                            const overEnd = Math.min(slotEnd, apptEnd);
+                            return overStart < overEnd; // Kesişme var
+                        })
+                        .map((appt: any) => appt.salon_id)
+                        .filter(Boolean);
+
+                    // Eğer uyan tüm salonların (validSalons) ID'si, occupied listesinde ise => o saat cidden kapalıdır
+                    return validSalons.every((salon: any) => occupiedSalonIdsForThisSlot.includes(salon.id));
+                })();
+
+                // AI Önerisi vs. için mock etiketleme ekleyebiliriz
+                let label;
+                if (!isOverlapping) {
+                    if (timeStr === "10:30") label = "AI Önerisi";
+                    if (timeStr === "13:00") label = "En Verimli";
+                }
+
+                slots.push({
+                    time: timeStr,
+                    disabled: isOverlapping,
+                    label: label
+                });
+            }
+        }
+        return slots;
+    })();
+
+    // Salonların müsaitlik durumunu hesapla
+    const occupiedSalonIds = (() => {
+        if (!selectedTime) return [];
+        const slotStart = timeToMinutes(selectedTime);
+        const reqDuration = totalDuration > 0 ? totalDuration : 30;
+        const slotEnd = slotStart + reqDuration;
+
+        return appointmentsOnSelectedDate
+            .filter(appt => {
+                const apptStart = timeToMinutes(appt.appointment_time);
+                const apptDuration = appt.total_duration_minutes || 0;
+                const apptEnd = apptStart + apptDuration;
+
+                const overStart = Math.max(slotStart, apptStart);
+                const overEnd = Math.min(slotEnd, apptEnd);
+                return overStart < overEnd; // Kesişme var
+            })
+            .map(appt => appt.salon_id)
+            .filter(Boolean); // null olanları çıkar
+    })();
+
     const handleCreateAppointment = async () => {
-        if (!selectedCustomer || selectedServices.length === 0 || !selectedDate || !selectedTime) {
-            alert("Lütfen müşteri, hizmet, tarih ve saati seçtiğinizden emin olun.");
+        if (!selectedCustomer || selectedServices.length === 0 || !selectedDate || !selectedTime || !selectedSalon) {
+            alert("Lütfen müşteri, hizmet, tarih, saat ve salon seçtiğinizden emin olun.");
             return;
         }
 
         setIsSubmitting(true);
         try {
-            // Tarihi formatla (YYYY-MM-DD)
-            const year = today.getFullYear();
-            const month = String(today.getMonth() + 1).padStart(2, '0');
-            const day = String(selectedDate).padStart(2, '0');
-            const appointmentDateStr = `${year}-${month}-${day}`;
-
             // Backend için hizmetleri formatla
             const servicesToInsert = selectedServices.map(s => ({
                 service_id: s.id,
@@ -72,6 +177,7 @@ export default function RandevuOlusturClient({ services, customers }: { services
 
             const res = await createAppointment({
                 customer_id: selectedCustomer.id,
+                salon_id: selectedSalon.id,
                 appointment_date: appointmentDateStr,
                 appointment_time: selectedTime,
                 total_duration_minutes: totalDuration,
@@ -149,6 +255,15 @@ export default function RandevuOlusturClient({ services, customers }: { services
                                         </div>
                                     </div>
                                 </div>
+                                {selectedSalon && (
+                                    <div className="mt-4 pt-4 border-t border-slate-100">
+                                        <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mb-4">Salon / Oda</p>
+                                        <div className="flex items-center gap-3">
+                                            <span className="material-symbols-outlined text-lg" style={{ color: selectedSalon.color_code || 'var(--color-primary)' }}>meeting_room</span>
+                                            <p className="text-sm font-bold">{selectedSalon.name}</p>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
 
@@ -197,26 +312,30 @@ export default function RandevuOlusturClient({ services, customers }: { services
             </div>
 
             <div className="flex items-center justify-between border-b border-slate-200 mb-8 px-4">
-                <div className="flex gap-12">
-                    <button className="pb-4 text-slate-400 font-medium border-b-2 border-transparent flex items-center gap-2">
-                        <span className="size-6 bg-slate-200 text-slate-500 rounded-full text-xs flex items-center justify-center">1</span>
+                <div className="flex flex-wrap gap-x-12 gap-y-4">
+                    <div className="pb-4 font-bold border-b-2 text-[var(--color-primary)] border-[var(--color-primary)] flex items-center gap-2 transition-all">
+                        <span className="size-6 rounded-full text-xs flex items-center justify-center bg-[var(--color-primary)] text-white">1</span>
                         Müşteri Seçimi
-                    </button>
-                    <button className="pb-4 text-[var(--color-primary)] font-bold border-b-2 border-[var(--color-primary)] flex items-center gap-2">
-                        <span className="size-6 bg-[var(--color-primary)] text-white rounded-full text-xs flex items-center justify-center">2</span>
+                    </div>
+                    <div className={`pb-4 font-bold border-b-2 flex items-center gap-2 transition-all ${isStep2Unlocked ? 'text-[var(--color-primary)] border-[var(--color-primary)]' : 'text-slate-400 border-transparent'}`}>
+                        <span className={`size-6 rounded-full text-xs flex items-center justify-center ${isStep2Unlocked ? 'bg-[var(--color-primary)] text-white' : 'bg-slate-200 text-slate-500'}`}>2</span>
                         Hizmet Seçimi
-                    </button>
-                    <button className="pb-4 text-slate-400 font-medium border-b-2 border-transparent flex items-center gap-2">
-                        <span className="size-6 bg-slate-200 text-slate-500 rounded-full text-xs flex items-center justify-center">3</span>
+                    </div>
+                    <div className={`pb-4 font-bold border-b-2 flex items-center gap-2 transition-all ${isStep3Unlocked ? 'text-[var(--color-primary)] border-[var(--color-primary)]' : 'text-slate-400 border-transparent'}`}>
+                        <span className={`size-6 rounded-full text-xs flex items-center justify-center ${isStep3Unlocked ? 'bg-[var(--color-primary)] text-white' : 'bg-slate-200 text-slate-500'}`}>3</span>
                         Tarih & Saat
-                    </button>
+                    </div>
+                    <div className={`pb-4 font-bold border-b-2 flex items-center gap-2 transition-all ${isStep4Unlocked ? 'text-[var(--color-primary)] border-[var(--color-primary)]' : 'text-slate-400 border-transparent'}`}>
+                        <span className={`size-6 rounded-full text-xs flex items-center justify-center ${isStep4Unlocked ? 'bg-[var(--color-primary)] text-white' : 'bg-slate-200 text-slate-500'}`}>4</span>
+                        Salon
+                    </div>
                 </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
                 <div className="lg:col-span-8 space-y-8">
                     {/* Müşteri Seçimi */}
-                    <section className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm">
+                    <section className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm transition-all duration-300 relative z-10">
                         <div className="flex items-center justify-between mb-4">
                             <h3 className="text-lg font-bold">Müşteri</h3>
                             <button
@@ -246,7 +365,7 @@ export default function RandevuOlusturClient({ services, customers }: { services
                     </section>
 
                     {/* Hizmet Seçimi (DİNAMİK) */}
-                    <section className="space-y-6">
+                    <section className={`space-y-6 transition-all duration-500 ${!isStep2Unlocked ? 'opacity-40 pointer-events-none select-none blur-[1px]' : ''}`}>
                         <div className="flex items-center justify-between flex-wrap gap-4">
                             <h3 className="text-xl font-bold">Hizmet Seçimi</h3>
                             <div className="flex items-center gap-3">
@@ -301,7 +420,7 @@ export default function RandevuOlusturClient({ services, customers }: { services
                     </section>
 
                     {/* Tarih ve Saat */}
-                    <section className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm">
+                    <section className={`bg-white rounded-3xl p-6 border border-slate-200 shadow-sm transition-all duration-500 ${!isStep3Unlocked ? 'opacity-40 pointer-events-none select-none blur-[1px]' : ''}`}>
                         <div className="flex items-center justify-between mb-6">
                             <h3 className="text-xl font-bold text-slate-900">Tarih & Saat</h3>
                             <div className="flex items-center gap-2 bg-[var(--color-primary)]/10 text-[var(--color-primary)] px-3 py-1.5 rounded-xl text-xs font-bold">
@@ -344,17 +463,7 @@ export default function RandevuOlusturClient({ services, customers }: { services
                             <div className="space-y-3">
                                 <p className="text-sm font-bold text-slate-600 mb-3 uppercase tracking-wider">Müsait Saatler</p>
                                 <div className="grid grid-cols-3 gap-2">
-                                    {[
-                                        { time: "09:00" },
-                                        { time: "10:30", label: "AI Önerisi" },
-                                        { time: "11:30" },
-                                        { time: "13:00", label: "En Verimli" },
-                                        { time: "14:30" },
-                                        { time: "15:00" },
-                                        { time: "16:30", disabled: true },
-                                        { time: "17:00" },
-                                        { time: "18:30" },
-                                    ].map((slot, i) => {
+                                    {availableSlots.map((slot, i) => {
                                         const isSelected = selectedTime === slot.time;
                                         const isDisabled = slot.disabled;
 
@@ -399,6 +508,64 @@ export default function RandevuOlusturClient({ services, customers }: { services
                                 </div>
                             </div>
                         </div>
+                    </section>
+
+                    {/* Salon Seçimi */}
+                    <section className={`bg-white rounded-3xl p-6 border border-slate-200 shadow-sm transition-all duration-500 ${!isStep4Unlocked ? 'opacity-40 pointer-events-none select-none blur-[1px]' : ''}`}>
+                        <div className="flex items-center justify-between mb-6">
+                            <h3 className="text-xl font-bold text-slate-900">Salon / Oda Seçimi</h3>
+                            {!isStep4Unlocked && (
+                                <p className="text-xs text-slate-400">Lütfen önce tarih ve saat seçin.</p>
+                            )}
+                        </div>
+
+                        {unassignedSelectedServices.length > 0 ? (
+                            <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-center animate-in fade-in">
+                                <span className="material-symbols-outlined text-red-500 text-4xl mb-3">error</span>
+                                <h4 className="text-red-800 font-bold text-lg mb-2">Hizmet İçin Oda Bulunamadı</h4>
+                                <p className="text-red-700 text-sm mb-4">
+                                    Seçmiş olduğunuz <strong>{unassignedSelectedServices.map((s: any) => s.name).join(", ")}</strong> hizmeti şu an hiçbir aktif odaya tanımlanmamış. Bu yüzden randevu oluşturulamaz.
+                                </p>
+                                <p className="text-red-600 text-xs font-medium">Lütfen sistem yöneticisiyle iletişime geçin veya ayarlardan salon/oda eşleştirmesini yapın.</p>
+                            </div>
+                        ) : validSalons.length > 0 ? (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {validSalons.map((salon: any) => {
+                                    const isOccupied = occupiedSalonIds.includes(salon.id);
+                                    const isSelected = selectedSalon?.id === salon.id;
+
+                                    return (
+                                        <button
+                                            key={salon.id}
+                                            onClick={() => !isOccupied && setSelectedSalon(salon)}
+                                            disabled={isOccupied}
+                                            className={`relative p-4 rounded-3xl border-2 text-left transition-all overflow-hidden ${isOccupied
+                                                ? 'border-slate-100 bg-slate-50 flex-col items-start cursor-not-allowed opacity-60'
+                                                : isSelected
+                                                    ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/5 shadow-md'
+                                                    : 'border-slate-200 hover:border-[var(--color-primary)]/50 hover:bg-slate-50'
+                                                }`}
+                                        >
+                                            <div className="absolute top-0 left-0 w-full h-1" style={{ backgroundColor: salon.color_code || '#805ad5' }}></div>
+                                            <div className="flex justify-between items-start mb-2 mt-1">
+                                                <h4 className={`font-bold ${isOccupied ? 'text-slate-500 line-through' : 'text-slate-900'}`}>{salon.name}</h4>
+                                                {isOccupied ? (
+                                                    <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-[10px] font-bold">Dolu</span>
+                                                ) : (
+                                                    <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-[10px] font-bold">Müsait</span>
+                                                )}
+                                            </div>
+                                            <p className="text-xs text-slate-500 line-clamp-1">{salon.description || 'Standart Oda'}</p>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        ) : (
+                            <div className="text-center py-6 text-slate-500 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                                <span className="material-symbols-outlined text-3xl mb-2 text-slate-300">meeting_room</span>
+                                <p>Seçili hizmetleri destekleyen uygun salon bulunamadı.</p>
+                            </div>
+                        )}
                     </section>
                 </div>
 

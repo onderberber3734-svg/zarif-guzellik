@@ -11,6 +11,7 @@ export function Sidebar() {
         { label: "Randevular", icon: "calendar_today", href: "/randevular" },
         { label: "Müşteriler", icon: "group", href: "/musteriler" },
         { label: "Hizmetler", icon: "content_cut", href: "/hizmetler" },
+        { label: "Salonlar", icon: "meeting_room", href: "/salonlar" },
         { label: "Finans", icon: "payments", href: "/finans" },
         { label: "Kampanyalar", icon: "campaign", href: "/kampanyalar" },
         { label: "AI Asistan", icon: "auto_awesome", href: "/ai-asistan", special: true },

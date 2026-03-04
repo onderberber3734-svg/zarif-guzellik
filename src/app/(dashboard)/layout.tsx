@@ -1,11 +1,19 @@
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
+import { getBusinessProfile } from "@/app/actions/businesses";
+import { redirect } from "next/navigation";
 
-export default function DashboardLayout({
+export default async function DashboardLayout({
     children,
 }: {
     children: React.ReactNode;
 }) {
+    const { data: business } = await getBusinessProfile();
+
+    if (business && !business.is_onboarding_completed) {
+        redirect("/onboarding");
+    }
+
     return (
         <div className="flex min-h-screen">
             <Sidebar />

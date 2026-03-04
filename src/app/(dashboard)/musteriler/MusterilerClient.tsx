@@ -5,15 +5,43 @@ import Link from "next/link";
 import { MusteriEkleModal } from "@/components/MusteriEkleModal";
 import { addCustomer, updateCustomer, deleteCustomer } from "@/app/actions/customers";
 import CustomerLink from "@/components/CustomerLink";
+import {
+    isVIPCustomer,
+    isNewCustomer,
+    isRiskGroup,
+    isBirthdayApproaching,
+    isLoyalCustomer,
+    SEGMENT_NAMES
+} from "@/utils/segmentRules";
 
 export default function MusterilerClient({ initialCustomers }: { initialCustomers: any[] }) {
     const [customers, setCustomers] = useState(initialCustomers);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingCustomer, setEditingCustomer] = useState<any>(null);
 
-    // Filtreleme stateleri
+    // Filtreleme ve Sıralama stateleri
     const [searchQuery, setSearchQuery] = useState("");
-    const [segmentFilter, setSegmentFilter] = useState("Tümü"); // Tümü, VIP, Sadık, Riskli, Yeni
+    const [segmentFilter, setSegmentFilter] = useState(SEGMENT_NAMES.ALL);
+    const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
+
+    const handleSort = (key: string) => {
+        let direction: 'asc' | 'desc' = 'asc';
+        if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+            direction = 'desc';
+        }
+        setSortConfig({ key, direction });
+    };
+
+    const renderSortIcon = (key: string) => {
+        if (!sortConfig || sortConfig.key !== key) {
+            return <span className="material-symbols-outlined text-[14px] opacity-0 group-hover:opacity-50 transition-opacity">unfold_more</span>;
+        }
+        return (
+            <span className="material-symbols-outlined text-[14px] text-slate-800">
+                {sortConfig.direction === 'asc' ? 'arrow_upward' : 'arrow_downward'}
+            </span>
+        );
+    };
 
     const handleAddCustomer = async (customerData: any) => {
         if (editingCustomer) {
@@ -68,45 +96,26 @@ export default function MusterilerClient({ initialCustomers }: { initialCustomer
     const filteredCustomers = customers.filter(c => {
         const matchesSearch = `${c.first_name} ${c.last_name} ${c.phone}`.toLowerCase().includes(searchQuery.toLowerCase());
 
-        // Zaman hesaplamaları için referanslar
-        const todayMs = new Date("2026-03-01T00:00:00Z").getTime();
-        const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
-        const currentMonthVal = 3; // Mart
-
         let matchesSegment = false;
 
         switch (segmentFilter) {
-            case "Tümü":
+            case SEGMENT_NAMES.ALL:
                 matchesSegment = true;
                 break;
-            case "VIP":
-                matchesSegment = (c.is_vip === true || c.segment === "VIP");
+            case SEGMENT_NAMES.VIP:
+                matchesSegment = isVIPCustomer(c);
                 break;
-            case "Standart":
-                matchesSegment = (c.is_vip !== true && c.segment !== "VIP");
+            case SEGMENT_NAMES.LOYAL:
+                matchesSegment = isLoyalCustomer(c);
                 break;
-            case "Riskli":
-                // 90 Günden fazladır gelmeyenler VEYA randevusu var ama hiç gelmemişler
-                if (c.stats && c.stats.daysSinceLastVisit !== null && c.stats.daysSinceLastVisit > 90) {
-                    matchesSegment = true;
-                } else if (c.stats && c.stats.totalAppointments > 0 && !c.stats.lastVisitDate) {
-                    matchesSegment = true;
-                }
+            case SEGMENT_NAMES.NEW:
+                matchesSegment = isNewCustomer(c);
                 break;
-            case "Yeni":
-                // Son 30 gün içinde oluşturulan kayıtlar VEYA AI özeti Yeni Başlangıç olanlar
-                const createdMs = new Date(c.created_at).getTime();
-                if ((todayMs - createdMs) <= thirtyDaysMs) {
-                    matchesSegment = true;
-                } else if (c.ai_summary === "Yeni Başlangıç") {
-                    matchesSegment = true;
-                }
+            case SEGMENT_NAMES.RISK:
+                matchesSegment = isRiskGroup(c);
                 break;
-            case "Doğum Günü":
-                if (c.birth_date) {
-                    const [, m,] = c.birth_date.split("-");
-                    if (parseInt(m) === currentMonthVal) matchesSegment = true;
-                }
+            case SEGMENT_NAMES.BIRTHDAY:
+                matchesSegment = isBirthdayApproaching(c);
                 break;
             default:
                 matchesSegment = true;
@@ -115,33 +124,48 @@ export default function MusterilerClient({ initialCustomers }: { initialCustomer
         return matchesSearch && matchesSegment;
     });
 
+    // Client-side sıralama
+    const sortedCustomers = [...filteredCustomers];
+    if (sortConfig !== null) {
+        sortedCustomers.sort((a, b) => {
+            let aValue: any = a[sortConfig.key];
+            let bValue: any = b[sortConfig.key];
+
+            // Özel anahtarlar için değer hesaplamaları
+            if (sortConfig.key === 'name') {
+                aValue = `${a.first_name} ${a.last_name}`.toLowerCase();
+                bValue = `${b.first_name} ${b.last_name}`.toLowerCase();
+            } else if (sortConfig.key === 'lastVisit') {
+                // Hiç gelmeyenleri en son tarihte/en yüksek gün gibi düşünelim (99999)
+                aValue = a.stats?.daysSinceLastVisit !== null && a.stats?.daysSinceLastVisit !== undefined ? a.stats.daysSinceLastVisit : 99999;
+                bValue = b.stats?.daysSinceLastVisit !== null && b.stats?.daysSinceLastVisit !== undefined ? b.stats.daysSinceLastVisit : 99999;
+            } else if (sortConfig.key === 'totalSpent') {
+                aValue = a.stats?.totalSpent || 0;
+                bValue = b.stats?.totalSpent || 0;
+            } else if (sortConfig.key === 'ai_summary') {
+                aValue = (a.ai_summary || "Yeni Başlangıç").toLowerCase();
+                bValue = (b.ai_summary || "Yeni Başlangıç").toLowerCase();
+            }
+
+            if (aValue < bValue) {
+                return sortConfig.direction === 'asc' ? -1 : 1;
+            }
+            if (aValue > bValue) {
+                return sortConfig.direction === 'asc' ? 1 : -1;
+            }
+            return 0;
+        });
+    }
+
     // İstatistik Metrikleri
     const totalCustomers = customers.length;
 
-    // Gerçek veri ve referanslarla hesaplanan VIP
-    const vipCount = customers.filter(c => c.is_vip === true || c.segment === "VIP").length;
-
-    // YENİ KAYIT Kartı: Son 30 günde hesaplanan veya Yeni Başlangıç özetine sahip olanlar
-    const todayMs_b = new Date("2026-03-01T00:00:00Z").getTime();
-    const thirtyDaysMs_b = 30 * 24 * 60 * 60 * 1000;
-    const newCount = customers.filter(c => {
-        const createdMs = new Date(c.created_at).getTime();
-        return (todayMs_b - createdMs) <= thirtyDaysMs_b || c.ai_summary === "Yeni Başlangıç";
-    }).length;
-
-    // RİSKLİ GRUP Kartı: Son ziyareti 90 günü geçmiş veya hiç gelmemiş olanlar
-    const riskCount = customers.filter(c => {
-        if (c.stats && c.stats.daysSinceLastVisit !== null && c.stats.daysSinceLastVisit > 90) return true;
-        if (c.stats && c.stats.totalAppointments > 0 && !c.stats.lastVisitDate) return true;
-        return false;
-    }).length;
-
-    // Doğum tarihi bu ay olanlar (basit hesap)
-    const birthdayCount = customers.filter(c => {
-        if (!c.birth_date) return false;
-        const [y, m, d] = c.birth_date.split("-");
-        return parseInt(m) === new Date("2026-03-01").getMonth() + 1;
-    }).length;
+    // Segment metrikleri (merkezi kurallara bağlı)
+    const vipCount = customers.filter(isVIPCustomer).length;
+    const loyalCount = customers.filter(isLoyalCustomer).length;
+    const newCount = customers.filter(isNewCustomer).length;
+    const riskCount = customers.filter(isRiskGroup).length;
+    const birthdayCount = customers.filter(isBirthdayApproaching).length;
 
     return (
         <div className="space-y-8 pb-20">
@@ -167,48 +191,58 @@ export default function MusterilerClient({ initialCustomers }: { initialCustomer
             </div>
 
             {/* Metrik Kartları Bölümü */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-5">
                 {/* VIP Kart */}
-                <div className="group relative flex flex-col p-5 bg-gradient-to-br from-[#805ad5] to-[#6b46c1] rounded-3xl shadow-md hover:shadow-xl hover:-translate-y-1 transition-all text-white overflow-hidden text-left cursor-pointer" onClick={() => setSegmentFilter("VIP")}>
+                <div className="group relative flex flex-col p-5 bg-gradient-to-br from-[#805ad5] to-[#6b46c1] rounded-3xl shadow-md hover:shadow-xl hover:-translate-y-1 transition-all text-white overflow-hidden text-left cursor-pointer" onClick={() => setSegmentFilter(SEGMENT_NAMES.VIP)}>
                     <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                         <span className="material-symbols-outlined text-8xl">diamond</span>
                     </div>
                     <div className="flex items-center gap-2 mb-3 relative z-10">
                         <span className="material-symbols-outlined text-white/90 text-[18px]">diamond</span>
-                        <span className="text-xs font-bold uppercase tracking-widest text-white/90">VIP MÜŞTERİLER</span>
+                        <span className="text-xs font-bold uppercase tracking-widest text-white/90">{SEGMENT_NAMES.VIP.toUpperCase()}</span>
                     </div>
                     <span className="text-4xl font-extrabold relative z-10">{vipCount}</span>
-                    <span className="text-xs text-white/70 mt-1 relative z-10 font-medium">Toplam VIP Müşteriniz</span>
+                    <span className="text-xs text-white/70 mt-1 relative z-10 font-medium">VIP üyelikte olanlar</span>
                 </div>
 
-                {/* Yeni Kayıtlar Kartı */}
-                <div className="group relative flex flex-col p-5 bg-white border border-slate-200 rounded-3xl shadow-sm hover:border-emerald-500 hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer" onClick={() => setSegmentFilter("Yeni")}>
+                {/* Sadık Müşteri Kartı */}
+                <div className="group relative flex flex-col p-5 bg-white border border-slate-200 rounded-3xl shadow-sm hover:border-amber-400 hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer" onClick={() => setSegmentFilter(SEGMENT_NAMES.LOYAL)}>
+                    <div className="flex items-center gap-2 mb-3 text-amber-500">
+                        <span className="material-symbols-outlined text-[18px]">workspace_premium</span>
+                        <span className="text-xs font-bold uppercase tracking-widest text-[#d97706]">{SEGMENT_NAMES.LOYAL.toUpperCase()}</span>
+                    </div>
+                    <span className="text-4xl font-extrabold text-slate-900">{loyalCount}</span>
+                    <span className="text-xs text-slate-500 mt-1 font-medium">3+ randevu & sık gelenler</span>
+                </div>
+
+                {/* Yeni Müşteriler Kartı */}
+                <div className="group relative flex flex-col p-5 bg-white border border-slate-200 rounded-3xl shadow-sm hover:border-emerald-500 hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer" onClick={() => setSegmentFilter(SEGMENT_NAMES.NEW)}>
                     <div className="flex items-center gap-2 mb-3 text-emerald-600">
                         <span className="inline-flex px-2 py-0.5 bg-emerald-100 rounded text-[10px] font-bold uppercase tracking-wider">YENİ</span>
-                        <span className="text-xs font-bold uppercase tracking-widest">YENİ KAYITLAR</span>
+                        <span className="text-xs font-bold uppercase tracking-widest">YENİ MÜŞTERİLER (30 GÜN)</span>
                     </div>
                     <span className="text-4xl font-extrabold text-slate-900">{newCount}</span>
-                    <span className="text-xs text-slate-500 mt-1 font-medium">İlk kez gelenler</span>
+                    <span className="text-xs text-slate-500 mt-1 font-medium">Son 30 günde eklenen kayıtlar</span>
                 </div>
 
                 {/* Riskli Grup Kartı */}
-                <div className="group relative flex flex-col p-5 bg-white border border-slate-200 rounded-3xl shadow-sm hover:border-rose-400 hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer" onClick={() => setSegmentFilter("Riskli")}>
+                <div className="group relative flex flex-col p-5 bg-white border border-slate-200 rounded-3xl shadow-sm hover:border-rose-400 hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer" onClick={() => setSegmentFilter(SEGMENT_NAMES.RISK)}>
                     <div className="flex items-center gap-2 mb-3 text-rose-600">
                         <span className="material-symbols-outlined text-[18px]">warning</span>
-                        <span className="text-xs font-bold uppercase tracking-widest">RİSKLİ GRUP</span>
+                        <span className="text-xs font-bold uppercase tracking-widest">{SEGMENT_NAMES.RISK.toUpperCase()}</span>
                     </div>
                     <span className="text-4xl font-extrabold text-slate-900">{riskCount}</span>
-                    <span className="text-xs text-slate-500 mt-1 font-medium">90+ gündür ziyaret etmeyenler</span>
+                    <span className="text-xs text-slate-500 mt-1 font-medium">90+ gündür completed randevusu olmayanlar</span>
                 </div>
 
                 {/* Doğum Günü Kartı */}
-                <div className="group relative flex flex-col p-5 bg-white border border-slate-200 rounded-3xl shadow-sm hover:border-blue-400 hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer">
+                <div className="group relative flex flex-col p-5 bg-white border border-slate-200 rounded-3xl shadow-sm hover:border-blue-400 hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer" onClick={() => setSegmentFilter(SEGMENT_NAMES.BIRTHDAY)}>
                     <div className="flex items-center gap-2 mb-3 text-blue-600">
                         <span className="material-symbols-outlined text-[18px]">cake</span>
-                        <span className="text-xs font-bold uppercase tracking-widest">DOĞUM GÜNÜ</span>
+                        <span className="text-xs font-bold uppercase tracking-widest">{SEGMENT_NAMES.BIRTHDAY.toUpperCase()}</span>
                     </div>
                     <span className="text-4xl font-extrabold text-slate-900">{birthdayCount}</span>
-                    <span className="text-xs text-slate-500 mt-1 font-medium">Bu ay yaklaşanlar</span>
+                    <span className="text-xs text-slate-500 mt-1 font-medium">Bu ay doğum günü yaklaşanlar</span>
                 </div>
             </div>
 
@@ -225,7 +259,7 @@ export default function MusterilerClient({ initialCustomers }: { initialCustomer
                     />
                 </div>
                 <div className="flex gap-2">
-                    {["Tümü", "VIP", "Standart", "Yeni", "Riskli"].map(f => (
+                    {Object.values(SEGMENT_NAMES).map(f => (
                         <button
                             key={f}
                             onClick={() => setSegmentFilter(f)}
@@ -252,16 +286,34 @@ export default function MusterilerClient({ initialCustomers }: { initialCustomer
                         <table className="w-full text-left border-collapse">
                             <thead>
                                 <tr className="bg-slate-50 border-b border-slate-200">
-                                    <th className="py-4 px-6 text-[10px] font-extrabold text-slate-500 uppercase tracking-widest whitespace-nowrap">MÜŞTERİ</th>
-                                    <th className="py-4 px-6 text-[10px] font-extrabold text-slate-500 uppercase tracking-widest whitespace-nowrap">İLETİŞİM</th>
-                                    <th className="py-4 px-6 text-[10px] font-extrabold text-slate-500 uppercase tracking-widest whitespace-nowrap">SON ZİYARET</th>
-                                    <th className="py-4 px-6 text-[10px] font-extrabold text-slate-500 uppercase tracking-widest whitespace-nowrap text-center">Aİ ÖZETİ</th>
-                                    <th className="py-4 px-6 text-[10px] font-extrabold text-slate-500 uppercase tracking-widest whitespace-nowrap text-right">TOPLAM HARCAMA</th>
+                                    <th className="py-4 px-6 text-[10px] font-extrabold text-slate-500 uppercase tracking-widest whitespace-nowrap cursor-pointer hover:bg-slate-100 transition-colors group" onClick={() => handleSort('name')}>
+                                        <div className="flex items-center gap-1">
+                                            MÜŞTERİ {renderSortIcon('name')}
+                                        </div>
+                                    </th>
+                                    <th className="py-4 px-6 text-[10px] font-extrabold text-slate-500 uppercase tracking-widest whitespace-nowrap">
+                                        İLETİŞİM
+                                    </th>
+                                    <th className="py-4 px-6 text-[10px] font-extrabold text-slate-500 uppercase tracking-widest whitespace-nowrap cursor-pointer hover:bg-slate-100 transition-colors group" onClick={() => handleSort('lastVisit')}>
+                                        <div className="flex items-center gap-1">
+                                            SON ZİYARET {renderSortIcon('lastVisit')}
+                                        </div>
+                                    </th>
+                                    <th className="py-4 px-6 text-[10px] font-extrabold text-slate-500 uppercase tracking-widest whitespace-nowrap text-center cursor-pointer hover:bg-slate-100 transition-colors group" onClick={() => handleSort('ai_summary')}>
+                                        <div className="flex items-center justify-center gap-1">
+                                            Aİ ÖZETİ {renderSortIcon('ai_summary')}
+                                        </div>
+                                    </th>
+                                    <th className="py-4 px-6 text-[10px] font-extrabold text-slate-500 uppercase tracking-widest whitespace-nowrap text-right cursor-pointer hover:bg-slate-100 transition-colors group" onClick={() => handleSort('totalSpent')}>
+                                        <div className="flex items-center justify-end gap-1">
+                                            {renderSortIcon('totalSpent')} TOPLAM HARCAMA
+                                        </div>
+                                    </th>
                                     <th className="py-4 px-6 text-[10px] font-extrabold text-slate-500 uppercase tracking-widest whitespace-nowrap text-right">İŞLEM</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                                {filteredCustomers.map(customer => {
+                                {sortedCustomers.map(customer => {
                                     const stats = customer.stats || {};
                                     const aiSummary = customer.ai_summary || "Yeni Başlangıç";
                                     const isVip = customer.segment === "VIP";

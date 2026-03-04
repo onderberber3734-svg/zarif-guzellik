@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 
 export async function createAppointment(appointmentData: {
     customer_id: string;
+    salon_id?: string;
     appointment_date: string; // YYYY-MM-DD
     appointment_time: string; // HH:MM
     total_duration_minutes: number;
@@ -37,6 +38,7 @@ export async function createAppointment(appointmentData: {
             {
                 business_id: businessUser.business_id,
                 customer_id: appointmentData.customer_id,
+                salon_id: appointmentData.salon_id || null,
                 appointment_date: appointmentData.appointment_date,
                 appointment_time: appointmentData.appointment_time,
                 status: 'scheduled',
@@ -164,6 +166,8 @@ export async function getAppointments() {
             total_price,
             notes,
             created_at,
+            salon_id,
+            salons(id, name, color_code),
             customer:customers(id, first_name, last_name, phone, email),
             services:appointment_services(
                 id,

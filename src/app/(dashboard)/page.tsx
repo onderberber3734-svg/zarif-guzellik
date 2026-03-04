@@ -1,6 +1,8 @@
 import { getAppointments } from "@/app/actions/appointments";
 import { getCustomers } from "@/app/actions/customers";
+import { getBusinessProfile } from "@/app/actions/businesses";
 import CustomerLink from "@/components/CustomerLink";
+import { ProductTour } from "@/components/layout/ProductTour";
 
 function getLocalIsoDate(date: Date) {
     const tzOffset = date.getTimezoneOffset() * 60000;
@@ -12,6 +14,7 @@ export default async function DashboardPage() {
     // Veritabanından gerçek verileri çekiyoruz
     const appointments = await getAppointments();
     const customers = await getCustomers();
+    const { data: business } = await getBusinessProfile();
 
     const today = new Date();
     const todayStr = getLocalIsoDate(today);
@@ -74,6 +77,7 @@ export default async function DashboardPage() {
 
     return (
         <div className="space-y-8 pb-16">
+            {business && !business.is_tour_completed && <ProductTour businessId={business.id} />}
             {/* Sayfa Başlığı */}
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
                 <div>
