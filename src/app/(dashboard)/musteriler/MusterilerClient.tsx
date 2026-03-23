@@ -349,6 +349,13 @@ export default function MusterilerClient({ initialCustomers }: { initialCustomer
                                         else if (stats.daysSinceLastVisit > 0 && stats.daysSinceLastVisit <= 7) lastVisitStr = `${stats.daysSinceLastVisit} Gün Önce`;
                                     }
 
+                                    // Gecikmiş Seans Planı Kontrolü
+                                    const todayMs = new Date().getTime();
+                                    const delayedPlans = (customer.session_plans || []).filter((p: any) =>
+                                        p.status === 'active' && p.next_recommended_date && new Date(p.next_recommended_date).getTime() < todayMs
+                                    );
+                                    const hasDelayedPlan = delayedPlans.length > 0;
+
                                     return (
                                         <tr key={customer.id} className="hover:bg-slate-50/80 transition-colors group">
                                             {/* Müşteri Kolonu (Avatar + İsim + VIP Badge) */}
@@ -367,6 +374,11 @@ export default function MusterilerClient({ initialCustomers }: { initialCustomer
                                                         {isVip && (
                                                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700 mt-1 uppercase tracking-wider">
                                                                 <span className="material-symbols-outlined text-[10px]">diamond</span>VIP
+                                                            </span>
+                                                        )}
+                                                        {hasDelayedPlan && (
+                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-700 mt-1 ml-1 uppercase tracking-wider" title="Seans zamanı geçmiş">
+                                                                <span className="material-symbols-outlined text-[10px]">warning</span>SEANS BEKLİYOR
                                                             </span>
                                                         )}
                                                     </div>

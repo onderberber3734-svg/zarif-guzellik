@@ -7,20 +7,32 @@ import { revalidatePath } from "next/cache";
 export async function getCustomersWithStats() {
     const supabase = await createClient();
 
-    // Müşterileri ve ilişkili randevularını çekiyoruz (harcama, ziyaret tarihi vb. hesapları için)
-    // Supabase auth.getUser() ve RLS sayesinde zaten sadece bu tenant'ın verisi gelir.
-    const { data: customersData, error } = await supabase
-        .from("customers")
-        .select(`
-            *,
-            appointments (
-                id,
-                appointment_date,
-                status,
-                total_price
-            )
-        `)
-        .order("created_at", { ascending: false });
+    // Müşterileri ve ilişkili randevularını çekiyoruz
+    const [customersRes, paymentsRes] = await Promise.all([
+        supabase
+            .from("customers")
+            .select(`
+                *,
+                appointments (
+                    id,
+                    appointment_date,
+                    status,
+                    total_price
+                ),
+                session_plans (
+                    status,
+                    next_recommended_date,
+                    services (name)
+                )
+            `)
+            .order("created_at", { ascending: false }),
+        supabase
+            .from("payments")
+            .select("customer_id, amount, paid_at")
+    ]);
+
+    const { data: customersData, error } = customersRes;
+    const paymentsData = paymentsRes.data || [];
 
     if (error) {
         console.error("Müşteriler çekilirken hata oluştu:", error.message);
@@ -29,7 +41,14 @@ export async function getCustomersWithStats() {
 
     if (!customersData) return [];
 
-    const today = new Date("2026-03-01T00:00:00"); // Sistem referans tarihi
+    // Ödemeleri customer_id'ye göre grupla
+    const paymentsByCustomer: Record<string, {amount: number, paid_at: string}[]> = {};
+    for (const pmt of paymentsData) {
+        if (!paymentsByCustomer[pmt.customer_id]) paymentsByCustomer[pmt.customer_id] = [];
+        paymentsByCustomer[pmt.customer_id].push(pmt);
+    }
+
+    const today = new Date();
     const todayMs = today.getTime();
 
     const enhancedCustomers = customersData.map((customer: any) => {
@@ -37,25 +56,38 @@ export async function getCustomersWithStats() {
 
         // Sadece geçmiş veya bugünkü TAMAMLANMIŞ randevular 'harcama' ve 'son ziyaret' için geçerlidir
         const validAppts = appts.filter((a: any) => a.status === "completed");
+        const paymentsArray = paymentsByCustomer[customer.id] || [];
 
         const totalAppointments = validAppts.length;
-        const totalSpent = validAppts.reduce((sum: number, a: any) => sum + (Number(a.total_price) || 0), 0);
+        const apptSpent = validAppts.reduce((sum: number, a: any) => sum + (Number(a.total_price) || 0), 0);
+        const paymentSpent = paymentsArray.reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0);
+        const totalSpent = apptSpent + paymentSpent;
 
         let lastVisitDate = null;
         let daysSinceLastVisit = null;
 
+        // Randevulardan gelen en son ziyaret tarihi
+        let maxApptDate = 0;
         if (validAppts.length > 0) {
             const sortedAppts = [...validAppts].sort((a: any, b: any) => new Date(b.appointment_date).getTime() - new Date(a.appointment_date).getTime());
+            maxApptDate = new Date(sortedAppts[0].appointment_date).getTime();
+        }
 
-            // En son *gerçekleşen* ziyaret
-            lastVisitDate = sortedAppts[0].appointment_date;
+        // Ödemelerden gelen en son işlem tarihi (Ödeme yapıldıysa müşteri gelmiş demektir)
+        let maxPaymentDate = 0;
+        if (paymentsArray.length > 0) {
+            const sortedPayments = [...paymentsArray].sort((a: any, b: any) => new Date(b.paid_at).getTime() - new Date(a.paid_at).getTime());
+            maxPaymentDate = new Date(sortedPayments[0].paid_at).getTime();
+        }
 
-            // Eğer geçmiş bir tarihse üzerinden geçen günü hesaplayalım
-            const lastVisitMs = new Date(lastVisitDate).getTime();
-            if (lastVisitMs <= todayMs) {
-                daysSinceLastVisit = Math.floor((todayMs - lastVisitMs) / (1000 * 60 * 60 * 24));
+        const trueLastVisitMs = Math.max(maxApptDate, maxPaymentDate);
+
+        if (trueLastVisitMs > 0) {
+            lastVisitDate = new Date(trueLastVisitMs).toISOString();
+            if (trueLastVisitMs <= todayMs) {
+                daysSinceLastVisit = Math.floor((todayMs - trueLastVisitMs) / (1000 * 60 * 60 * 24));
             } else {
-                daysSinceLastVisit = 0; // Bugün
+                daysSinceLastVisit = 0;
             }
         }
 
@@ -98,7 +130,24 @@ export async function getCustomers() {
 
     const { data, error } = await supabase
         .from("customers")
-        .select("*")
+        .select(`
+            *,
+            session_plans (
+                id,
+                service_id,
+                total_sessions,
+                completed_sessions,
+                next_recommended_date,
+                recommended_interval_days,
+                status,
+                package_total_price,
+                paid_amount,
+                payment_mode,
+                payment_status,
+                pricing_model,
+                services (name)
+            )
+        `)
         .order("created_at", { ascending: false });
 
     if (error) {
@@ -234,27 +283,46 @@ export async function deleteCustomer(customerId: string) {
 export async function getAppointedCustomerDetails(customerId: string) {
     const supabase = await createClient();
 
-    const { data: customer, error } = await supabase
-        .from("customers")
-        .select(`
-            *,
-            appointments (
+    // Önce müşteri + randevu + seans planı bilgilerini çek
+    const [customerRes, paymentsRes] = await Promise.all([
+        supabase
+            .from("customers")
+            .select(`
                 *,
-                appointment_services (
+                appointments (
                     *,
-                    services (*)
+                    appointment_services (
+                        *,
+                        services (*),
+                        session_plans (
+                            id,
+                            total_sessions
+                        )
+                    )
+                ),
+                session_plans (
+                    *,
+                    services (name)
                 )
-            )
-        `)
-        .eq("id", customerId)
-        .single();
+            `)
+            .eq("id", customerId)
+            .single(),
+        supabase
+            .from("payments")
+            .select("*")
+            .eq("customer_id", customerId)
+            .order("paid_at", { ascending: false })
+    ]);
+
+    const { data: customer, error } = customerRes;
+    const paymentsArray = paymentsRes.data || [];
 
     if (error || !customer) {
         console.error("Müşteri detayı çekilirken HATA DETAYI:", JSON.stringify(error, null, 2));
         return null;
     }
 
-    const todayMs = new Date("2026-03-01T00:00:00Z").getTime();
+    const todayMs = new Date().getTime();
 
     // Tüm randevuları azalan (yeni->eski) tarihe göre sırala
     const appts = customer.appointments || [];
@@ -264,29 +332,27 @@ export async function getAppointedCustomerDetails(customerId: string) {
     const completedAppts = sortedAppts.filter((a: any) => a.status === "completed");
 
     const totalAppointments = appts.length;
-    const totalSpent = completedAppts.reduce((sum: number, a: any) => sum + (Number(a.total_price) || 0), 0);
+    
+    const apptSpent = completedAppts.reduce((sum: number, a: any) => sum + (Number(a.total_price) || 0), 0);
+    const paymentSpent = paymentsArray.reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0);
+    const totalSpent = apptSpent + paymentSpent;
 
     let lastVisitDate = null;
     let firstVisitDate = null;
     let daysSinceLastVisit = null;
     let lastServiceName = "Hizmet Alınmadı";
 
+    // Randevulardan gelen tarihler
+    let maxApptDate = 0;
+    let minApptDate = Infinity;
+
     if (completedAppts.length > 0) {
         const lastAppt = completedAppts[0]; // En yeni tamamlanan
-        lastVisitDate = lastAppt.appointment_date;
-
+        maxApptDate = new Date(lastAppt.appointment_date).getTime();
+        
         const firstAppt = completedAppts[completedAppts.length - 1]; // En eski tamamlanan
-        firstVisitDate = firstAppt.appointment_date;
+        minApptDate = new Date(firstAppt.appointment_date).getTime();
 
-        const lastVisitMs = new Date(lastVisitDate).getTime();
-        // Sadece geçmişteyse gün farkı hesapla
-        if (lastVisitMs < todayMs) {
-            daysSinceLastVisit = Math.floor((todayMs - lastVisitMs) / (1000 * 60 * 60 * 24));
-        } else {
-            daysSinceLastVisit = 0; // Bugün veya gelecekte (hata payı)
-        }
-
-        // Son alınan hizmetin adını çekme (appointment_services -> services)
         if (lastAppt.appointment_services && lastAppt.appointment_services.length > 0) {
             const serviceNames = lastAppt.appointment_services
                 .map((as: any) => as.services?.name)
@@ -295,15 +361,40 @@ export async function getAppointedCustomerDetails(customerId: string) {
                 lastServiceName = serviceNames.join(", ");
             }
         }
+    }
+
+    // Ödemelerden gelen tarihler
+    let maxPaymentDate = 0;
+    let minPaymentDate = Infinity;
+    if (paymentsArray.length > 0) {
+        const sortedPayments = [...paymentsArray].sort((a: any, b: any) => new Date(b.paid_at).getTime() - new Date(a.paid_at).getTime());
+        maxPaymentDate = new Date(sortedPayments[0].paid_at).getTime();
+        minPaymentDate = new Date(sortedPayments[sortedPayments.length - 1].paid_at).getTime();
+    }
+
+    const trueLastVisitMs = Math.max(maxApptDate, maxPaymentDate);
+    const trueFirstVisitMs = Math.min(minApptDate, minPaymentDate);
+
+    if (trueLastVisitMs > 0) {
+        lastVisitDate = new Date(trueLastVisitMs).toISOString();
+        if (trueLastVisitMs <= todayMs) {
+            daysSinceLastVisit = Math.floor((todayMs - trueLastVisitMs) / (1000 * 60 * 60 * 24));
+        } else {
+            daysSinceLastVisit = 0;
+        }
     } else {
-        // Hiç tamamlanan randevusu yok ama bekleyen randevusu var mı? (Geriye Dönük AI ve Filtre Senkronizasyonu)
+        // Tamamlanan randevu yok, ödeme de yok, ama bekleyen randevu var mı?
         const validAppt = sortedAppts.filter((a: any) => a.status !== "canceled" && a.status !== "no_show");
         if (validAppt.length > 0) {
             const lastValidMs = new Date(validAppt[0].appointment_date).getTime();
-            if (lastValidMs < todayMs) {
+            if (lastValidMs <= todayMs) {
                 daysSinceLastVisit = Math.floor((todayMs - lastValidMs) / (1000 * 60 * 60 * 24));
             }
         }
+    }
+
+    if (trueFirstVisitMs !== Infinity) {
+        firstVisitDate = new Date(trueFirstVisitMs).toISOString();
     }
 
     // AI Özet Karar Mekanizması

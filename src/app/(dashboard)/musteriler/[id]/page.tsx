@@ -1,6 +1,7 @@
 import { getAppointedCustomerDetails } from "@/app/actions/customers";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { SessionPlanPaymentClient } from "./SessionPlanPaymentClient";
 
 export default async function MusteriDetayPage({ params }: { params: { id: string } }) {
     const { id } = await params;
@@ -93,14 +94,20 @@ export default async function MusteriDetayPage({ params }: { params: { id: strin
 
                 {/* Aksiyonlar */}
                 <div className="flex flex-col gap-2 w-full md:w-auto z-10">
-                    <button className="flex items-center justify-center gap-2 bg-[var(--color-primary)] text-white px-6 py-3 rounded-2xl font-bold shadow-lg shadow-[var(--color-primary)]/20 hover:opacity-90 transition-all text-sm w-full">
+                    <Link
+                        href={`/musteriler/${id}/duzenle`}
+                        className="flex items-center justify-center gap-2 bg-[var(--color-primary)] text-white px-6 py-3 rounded-2xl font-bold shadow-lg shadow-[var(--color-primary)]/20 hover:opacity-90 transition-all text-sm w-full"
+                    >
                         <span className="material-symbols-outlined text-sm">edit</span>
                         Profili Düzenle
-                    </button>
-                    <button className="flex items-center justify-center gap-2 bg-white border border-slate-200 text-slate-600 px-6 py-3 rounded-2xl font-bold hover:bg-slate-50 transition-all shadow-sm text-sm w-full">
+                    </Link>
+                    <Link
+                        href={`/randevu-olustur?customer_id=${id}`}
+                        className="flex items-center justify-center gap-2 bg-white border border-slate-200 text-slate-600 px-6 py-3 rounded-2xl font-bold hover:bg-slate-50 transition-all shadow-sm text-sm w-full"
+                    >
                         <span className="material-symbols-outlined text-sm">calendar_add_on</span>
                         Randevu Oluştur
-                    </button>
+                    </Link>
                 </div>
             </div>
 
@@ -134,6 +141,149 @@ export default async function MusteriDetayPage({ params }: { params: { id: strin
                     </span>
                 </div>
             </div>
+
+            {/* Aktif Seans Planları Kartı */}
+            {customer.session_plans && customer.session_plans.length > 0 && (
+                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col mb-8">
+                    <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-purple-50 to-white">
+                        <div>
+                            <h3 className="text-xl font-extrabold text-slate-900 flex items-center gap-2">
+                                <span className="material-symbols-outlined text-[var(--color-primary)]">style</span>
+                                Seans Planları
+                            </h3>
+                            <p className="text-sm text-slate-500 mt-1">Müşterinin satın aldığı paketler ve aktif seansları</p>
+                        </div>
+                    </div>
+                    <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-5 bg-slate-50/50">
+                        {customer.session_plans.map((plan: any) => {
+                            const todayMs = new Date().getTime();
+                            let isDelayed = false;
+                            let delayDays = 0;
+                            let nextDateText = "Belirsiz";
+
+                            // 1. Önce bu plan için aktif olarak planlanmış bir randevu var mı?
+                            const scheduledAppt = sortedAppointments.find((a: any) => 
+                                (a.status === 'scheduled' || a.status === 'checked_in') && 
+                                a.appointment_services?.some((as: any) => as.session_plan_id === plan.id)
+                            );
+
+                            if (scheduledAppt) {
+                                const apptMs = new Date(scheduledAppt.appointment_date).getTime();
+                                if (apptMs < todayMs) {
+                                    isDelayed = true;
+                                    delayDays = Math.floor((todayMs - apptMs) / (1000 * 60 * 60 * 24));
+                                }
+                                nextDateText = new Date(scheduledAppt.appointment_date).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' });
+                            } else if (plan.completed_sessions === 0) {
+                                // Hiç randevu planlanmamış ve ilk seans henüz alınmamış.
+                                nextDateText = "1. Seansı Planlayın";
+                                isDelayed = false;
+                            } else if (plan.next_recommended_date) {
+                                // İlk seans alınmış ve sonraki seans için manuel plan yapılmamış, o yüzden hedeflenen (önerilen) tarihi göster
+                                const nextMs = new Date(plan.next_recommended_date).getTime();
+                                if (nextMs < todayMs && plan.status === 'active') {
+                                    isDelayed = true;
+                                    delayDays = Math.floor((todayMs - nextMs) / (1000 * 60 * 60 * 24));
+                                }
+                                nextDateText = new Date(plan.next_recommended_date).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' });
+                            }
+
+                            const progressPercent = Math.min(100, Math.round((plan.completed_sessions / plan.total_sessions) * 100));
+
+                            return (
+                                <div key={plan.id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all relative overflow-hidden group">
+                                    {plan.status === 'completed' && <div className="absolute top-0 left-0 w-full h-1 bg-emerald-500"></div>}
+                                    {plan.status === 'active' && <div className="absolute top-0 left-0 w-full h-1 bg-[var(--color-primary)]"></div>}
+
+                                    <div className="flex justify-between items-start mb-4">
+                                        <h4 className="font-extrabold text-lg text-slate-900 flex items-center gap-2">
+                                            {plan.services?.name || "Bilinmeyen Hizmet"}
+                                        </h4>
+                                        <span className={`px-3 py-1 text-[11px] font-bold uppercase tracking-wider rounded-xl ${plan.status === 'completed' ? 'bg-emerald-100 text-emerald-700' :
+                                            plan.status === 'canceled' ? 'bg-slate-100 text-slate-500' : 'bg-purple-100 text-[var(--color-primary)]'
+                                            }`}>
+                                            {plan.status === 'completed' ? 'TAMAMLANDI' : plan.status === 'canceled' ? 'İPTAL' : 'AKTİF'}
+                                        </span>
+                                    </div>
+
+                                    <div className="mb-4">
+                                        <div className="flex justify-between text-sm mb-1 font-bold text-slate-600">
+                                            <span>İlerleme ({plan.completed_sessions}/{plan.total_sessions})</span>
+                                            <span className={plan.status === 'completed' ? 'text-emerald-600' : 'text-[var(--color-primary)]'}>{progressPercent}%</span>
+                                        </div>
+                                        <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                                            <div
+                                                className={`h-full transition-all duration-500 rounded-full ${plan.status === 'completed' ? 'bg-emerald-500' : 'bg-[var(--color-primary)]'}`}
+                                                style={{ width: `${progressPercent}%` }}
+                                            ></div>
+                                        </div>
+                                    </div>
+
+                                    <div className={`p-3 rounded-xl border ${isDelayed ? 'bg-rose-50 border-rose-100' : 'bg-slate-50 border-slate-100'} flex justify-between items-center transition-colors`}>
+                                        <div>
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">SONRAKİ SEANS</p>
+                                            <p className={`text-sm font-extrabold flex items-center gap-1 ${isDelayed ? 'text-rose-600' : 'text-slate-800'}`}>
+                                                <span className="material-symbols-outlined text-[16px]">event</span>
+                                                {nextDateText}
+                                            </p>
+                                        </div>
+                                        {isDelayed && (
+                                            <span className="text-[10px] font-bold bg-rose-100 text-rose-700 px-2 py-1 rounded-lg flex items-center gap-1 shadow-sm">
+                                                <span className="material-symbols-outlined text-[14px]">warning</span>
+                                                Gecikti ({delayDays} gün)
+                                            </span>
+                                        )}
+                                        {plan.status === 'completed' && (
+                                            <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-1 rounded-lg flex items-center gap-1">
+                                                <span className="material-symbols-outlined text-[14px]">check</span>
+                                                Paket Bitti
+                                            </span>
+                                        )}
+                                    </div>
+
+                                    {/* Kullanım Özeti */}
+                                    <div className="mt-3 bg-slate-50 border border-slate-100 p-3 rounded-xl text-xs text-slate-700">
+                                        <div className="flex justify-between items-center mb-1">
+                                            <span className="font-semibold text-slate-500 uppercase tracking-widest text-[10px]">Kullanılan Seans</span>
+                                            <span className="font-bold text-[var(--color-primary)]">{plan.completed_sessions} / {plan.total_sessions}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <span className="font-semibold text-slate-500 uppercase tracking-widest text-[10px]">Kalan Seans</span>
+                                            <span className="font-bold text-slate-700">{plan.total_sessions - plan.completed_sessions}</span>
+                                        </div>
+                                    </div>
+
+                                    {/* Finansal Paket Bilgisi */}
+                                    {plan.package_total_price && (
+                                        <SessionPlanPaymentClient
+                                            planId={plan.id}
+                                            customerId={customer.id}
+                                            packageTotalPrice={plan.package_total_price}
+                                            paidAmount={plan.paid_amount || 0}
+                                            paymentMode={plan.payment_mode || 'prepaid_full'}
+                                        />
+                                    )}
+
+                                    {plan.status === 'active' && (
+                                        <div className="mt-4 pt-4 border-t border-slate-100 flex justify-end gap-2">
+                                            {isDelayed && customer.phone && (
+                                                <a href={`tel:${customer.phone.replace(/\s+/g, '')}`} className="px-4 py-2 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900 hover:border-slate-300 rounded-xl text-sm font-bold flex items-center gap-1.5 transition-all shadow-sm">
+                                                    <span className="material-symbols-outlined text-[18px]">call</span>
+                                                    Arama Yap
+                                                </a>
+                                            )}
+                                            <Link href={`/randevu-olustur?customer_id=${customer.id}&service_id=${plan.service_id}`} className="px-5 py-2 bg-[var(--color-primary)] text-white hover:bg-purple-700 hover:shadow-md hover:shadow-purple-500/20 rounded-xl text-sm font-bold flex items-center gap-1.5 transition-all ml-auto shadow-sm">
+                                                <span className="material-symbols-outlined text-[18px]">calendar_add_on</span>
+                                                Seans Planla
+                                            </Link>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
 
             {/* Randevu Geçmişi Tablosu */}
             <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
@@ -183,7 +333,13 @@ export default async function MusteriDetayPage({ params }: { params: { id: strin
                                     // Hizmet formatı
                                     let servicesStr = "Hizmet belirtilmemiş";
                                     if (appt.appointment_services && appt.appointment_services.length > 0) {
-                                        servicesStr = appt.appointment_services.map((as: any) => as.services?.name).filter(Boolean).join(", ");
+                                        servicesStr = appt.appointment_services.map((as: any) => {
+                                            const name = as.services?.name;
+                                            if (as.session_plan_id && as.session_plans && as.session_number) {
+                                                return `${name} (Seans ${as.session_number}/${as.session_plans.total_sessions})`;
+                                            }
+                                            return name;
+                                        }).filter(Boolean).join(", ");
                                     }
 
                                     return (
@@ -193,7 +349,7 @@ export default async function MusteriDetayPage({ params }: { params: { id: strin
                                                     {apptDate.toLocaleDateString("tr-TR", { day: 'numeric', month: 'long', year: 'numeric' })}
                                                 </p>
                                                 <p className="text-sm font-medium text-slate-500 mt-0.5">
-                                                    {apptDate.toLocaleTimeString("tr-TR", { hour: '2-digit', minute: '2-digit' })}
+                                                    {appt.appointment_time ? appt.appointment_time.substring(0, 5) : "Belirtilmedi"}
                                                 </p>
                                             </td>
                                             <td className="py-4 px-6">

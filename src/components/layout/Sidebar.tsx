@@ -11,6 +11,8 @@ export function Sidebar() {
         { label: "Randevular", icon: "calendar_today", href: "/randevular" },
         { label: "Müşteriler", icon: "group", href: "/musteriler" },
         { label: "Hizmetler", icon: "content_cut", href: "/hizmetler" },
+        { label: "Personel", icon: "badge", href: "/personel" },
+        { label: "Paket & Seans", icon: "layers", href: "/paket-seans" },
         { label: "Salonlar", icon: "meeting_room", href: "/salonlar" },
         { label: "Finans", icon: "payments", href: "/finans" },
         { label: "Kampanyalar", icon: "campaign", href: "/kampanyalar" },
@@ -36,6 +38,7 @@ export function Sidebar() {
                         <Link
                             key={item.label}
                             href={item.href}
+                            id={`tour-${item.href === "/" ? "panel" : item.href.replace("/", "")}`}
                             className={`flex items-center gap-3 px-6 py-3.5 rounded-2xl transition-all duration-200 active:scale-[0.98] ${isActive
                                 ? "bg-purple-50 text-[var(--color-primary)] font-bold shadow-sm"
                                 : "hover:bg-slate-50 text-slate-500 font-bold hover:text-slate-700"

@@ -75,7 +75,7 @@ export function MusteriEkleModal({ isOpen, initialData, onClose, onAdd }: Muster
     };
 
     return (
-        <div className="fixed inset-0 z-50 overflow-hidden flex justify-end">
+        <div className="fixed inset-0 z-[9999] overflow-hidden flex justify-end">
             {/* Arka plan overlay */}
             <div
                 className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity"

@@ -35,7 +35,7 @@ export async function getSalons() {
     return data || [];
 }
 
-export async function createSalon(salonData: { name: string; description?: string; color_code?: string; capacity?: number; is_active?: boolean; service_ids?: string[] }) {
+export async function createSalon(salonData: { name: string; type?: string; description?: string; color_code?: string; capacity?: number; is_active?: boolean; inactive_until?: string | null; service_ids?: string[] }) {
     const supabase = await createClient();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -63,7 +63,11 @@ export async function createSalon(salonData: { name: string; description?: strin
     if (error) return { success: false, error: error.message };
 
     if (service_ids && service_ids.length > 0) {
-        const servicesToInsert = service_ids.map(id => ({ salon_id: data.id, service_id: id }));
+        const servicesToInsert = service_ids.map(id => ({
+            salon_id: data.id,
+            service_id: id,
+            business_id: businessUser.business_id
+        }));
         await supabase.from("salon_services").insert(servicesToInsert);
     }
 
@@ -71,10 +75,50 @@ export async function createSalon(salonData: { name: string; description?: strin
     return { success: true, data };
 }
 
-export async function updateSalon(id: string, updates: Partial<{ name: string; description: string; color_code: string; capacity: number; is_active: boolean; service_ids: string[] }>) {
+export async function updateSalon(id: string, updates: Partial<{ name: string; type: string; description: string; color_code: string; capacity: number; is_active: boolean; inactive_until: string | null; service_ids: string[] }>) {
     const supabase = await createClient();
 
     const { service_ids, ...restUpdates } = updates;
+
+    // Check if we are trying to set is_active to false
+    if (restUpdates.is_active === false) {
+        // Validate that there are no upcoming appointments
+        const todayStr = new Date().toISOString().split('T')[0];
+
+        let query = supabase
+            .from("appointments")
+            .select(`
+                id,
+                appointment_date,
+                appointment_time,
+                status,
+                customer:customers (first_name, last_name)
+            `)
+            .eq("salon_id", id)
+            .in("status", ["scheduled"])
+            .gte("appointment_date", todayStr);
+
+        // If closed until a specific date, only check appointments up to that date
+        if (restUpdates.inactive_until) {
+            query = query.lte("appointment_date", restUpdates.inactive_until);
+        }
+
+        const { data: blockingAppts, error: apptError } = await query.limit(10);
+
+        if (apptError) {
+            return { success: false, error: "Randevu kontrolü yapılamadı: " + apptError.message };
+        }
+
+        if (blockingAppts && blockingAppts.length > 0) {
+            return {
+                success: false,
+                error: restUpdates.inactive_until
+                    ? `Bu odayı ${new Date(restUpdates.inactive_until).toLocaleDateString('tr-TR')} tarihine kadar pasife alamazsınız çünkü bu tarihe kadar planlanmış randevular bulunmaktadır.`
+                    : "Bu salonu/odayı pasife alamazsınız çünkü ileri tarihli planlanmış randevular bulunmaktadır.",
+                blockingAppointments: blockingAppts
+            };
+        }
+    }
 
     if (Object.keys(restUpdates).length > 0) {
         const { error } = await supabase
@@ -85,11 +129,23 @@ export async function updateSalon(id: string, updates: Partial<{ name: string; d
     }
 
     if (service_ids !== undefined) {
+        // Find business_id
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        const { data: businessUser } = await supabase
+            .from("business_users")
+            .select("business_id")
+            .eq("user_id", user?.id)
+            .single();
+
         // Eski servis bağlantılarını sil
         await supabase.from("salon_services").delete().eq("salon_id", id);
         // Yenilerini ekle
-        if (service_ids.length > 0) {
-            const servicesToInsert = service_ids.map(sid => ({ salon_id: id, service_id: sid }));
+        if (service_ids.length > 0 && businessUser?.business_id) {
+            const servicesToInsert = service_ids.map(sid => ({
+                salon_id: id,
+                service_id: sid,
+                business_id: businessUser.business_id
+            }));
             await supabase.from("salon_services").insert(servicesToInsert);
         }
     }

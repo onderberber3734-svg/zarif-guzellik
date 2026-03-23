@@ -1,0 +1,37 @@
+{
+  "daily_summary": {
+    "today_appointments": 12,
+    "today_revenue": 14500,
+    "today_collections": 8000,
+    "outstanding_amount": 12500,
+    "overdue_sessions_count": 8,
+    "top_services": ["Lazer Epilasyon", "Cilt Bakımı"],
+    "empty_slot_count": 2,
+    "business_name": "Premium Güzellik Lmt."
+  },
+  "fill_empty_slots": {
+    "empty_slots": [
+      {"date": "2026-03-22", "time": "14:00"},
+      {"date": "2026-03-22", "time": "15:00"},
+      {"date": "2026-03-23", "time": "09:00"}
+    ],
+    "top_inactive_customers": ["A*** Y*** (#1AB2)", "M*** K*** (#89F1)"],
+    "best_selling_service": "Bölgesel İncelme"
+  },
+  "winback": {
+    "at_risk_customers": [
+      {"name": "S*** D*** (#99FF)", "days_since_last": 110, "fav_service": "Genel", "total_spent": 12000},
+      {"name": "E*** A*** (#412A)", "days_since_last": 145, "fav_service": "Genel", "total_spent": 8500}
+    ],
+    "total_at_risk": 2,
+    "business_name": "Premium Güzellik Lmt."
+  },
+  "campaign_copy": {
+    "campaign_name": "Yaza Hazırlık VIP",
+    "segment": "Sadık Müşteriler",
+    "channel": "whatsapp",
+    "discount_percent": 25,
+    "service_name": "Lazer Epilasyon",
+    "business_name": "Premium Güzellik Lmt."
+  }
+}

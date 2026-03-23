@@ -6,7 +6,8 @@ import { signUp, signIn } from "@/app/actions/auth";
 export default function RegisterPage() {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
-    const [businessName, setBusinessName] = useState("");
+    const [firstName, setFirstName] = useState("");
+    const [lastName, setLastName] = useState("");
 
     // Yükleniyor ve hata yönetimi state'leri
     const [loading, setLoading] = useState(false);
@@ -19,7 +20,7 @@ export default function RegisterPage() {
         setSuccessMessage("");
         setLoading(true);
 
-        const result = await signUp({ email, password, businessName });
+        const result = await signUp({ email, password, firstName, lastName });
 
         setLoading(false);
 
@@ -57,16 +58,29 @@ export default function RegisterPage() {
                             </div>
                         )}
 
-                        <div>
-                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">İşletme Adı *</label>
-                            <input
-                                type="text"
-                                required
-                                value={businessName}
-                                onChange={(e) => setBusinessName(e.target.value)}
-                                className="appearance-none block w-full px-4 py-3 border border-slate-200 rounded-xl bg-slate-50 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:border-[var(--color-primary)]/30 text-sm font-medium transition-all"
-                                placeholder="Örn: Zarif Güzellik Nişantaşı"
-                            />
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Adınız *</label>
+                                <input
+                                    type="text"
+                                    required
+                                    value={firstName}
+                                    onChange={(e) => setFirstName(e.target.value)}
+                                    className="appearance-none block w-full px-4 py-3 border border-slate-200 rounded-xl bg-slate-50 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:border-[var(--color-primary)]/30 text-sm font-medium transition-all"
+                                    placeholder="Örn: Ayşe"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Soyadınız *</label>
+                                <input
+                                    type="text"
+                                    required
+                                    value={lastName}
+                                    onChange={(e) => setLastName(e.target.value)}
+                                    className="appearance-none block w-full px-4 py-3 border border-slate-200 rounded-xl bg-slate-50 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:border-[var(--color-primary)]/30 text-sm font-medium transition-all"
+                                    placeholder="Örn: Yılmaz"
+                                />
+                            </div>
                         </div>
 
                         <div>

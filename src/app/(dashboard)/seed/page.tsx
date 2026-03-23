@@ -1,91 +1,79 @@
 "use client";
 
-import { useState } from "react";
-import { seedDemoData } from "@/app/actions/seed";
+import { useTransition, useState } from "react";
+import { runBusinessSeed } from "@/app/actions/seed";
 
 export default function SeedPage() {
-    const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
-    const [message, setMessage] = useState("");
+    const [isPending, startTransition] = useTransition();
+    const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+    const [errmsg, setErrmsg] = useState("");
 
-    const handleSeed = async () => {
+    const handleSeed = () => {
+        if (!confirm("DİKKAT! Bu işlem, hesabınıza (SADECE sizin işletmenize) bağlı TÜM randevu, müşteri ve gelir geçmişinizi silecektir. Devam etmek istiyor musunuz?")) return;
+        
         setStatus("loading");
-        setMessage("");
-        try {
-            const result = await seedDemoData();
+        startTransition(async () => {
+            const result = await runBusinessSeed();
             if (result.success) {
-                setStatus("done");
-                setMessage(result.message);
+                setStatus("success");
             } else {
                 setStatus("error");
-                setMessage(result.message);
+                setErrmsg(result.error || "Bilinmeyen hata");
             }
-        } catch (e: any) {
-            setStatus("error");
-            setMessage("Beklenmeyen hata: " + e.message);
-        }
+        });
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-slate-50">
-            <div className="bg-white rounded-3xl p-10 shadow-xl border border-slate-200 max-w-md w-full text-center">
-                <div className="size-16 mx-auto bg-[var(--color-primary)]/10 rounded-full flex items-center justify-center mb-6">
-                    <span className="material-symbols-outlined text-3xl text-[var(--color-primary)]">science</span>
+        <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 h-full w-full">
+            <div className="bg-white p-8 rounded-3xl shadow-xl max-w-lg w-full text-center border border-slate-100">
+                <div className="w-20 h-20 bg-rose-50 rounded-full mx-auto flex items-center justify-center mb-6">
+                    <span className="material-symbols-outlined text-rose-500 text-4xl">database</span>
                 </div>
-                <h1 className="text-2xl font-extrabold text-slate-900 mb-2">Demo Veri Yükle</h1>
-                <p className="text-slate-500 text-sm mb-8 leading-relaxed">
-                    Bu işlem;{" "}
-                    <span className="font-bold text-slate-700">18 test müşterisi</span> ve{" "}
-                    <span className="font-bold text-slate-700">35 randevu</span>{" "}
-                    ekler. Tüm kayıtlar yalnızca <span className="font-bold text-slate-700">sizin işletmenize</span> ait olacaktır.
+                
+                <h1 className="text-2xl font-extrabold text-slate-800 mb-4">Geliştirici Sandbox Modu</h1>
+                <p className="text-slate-500 mb-8 leading-relaxed">
+                    Sistemde <strong>70 aktif müşteri, 5 personel ve ~250 geçmiş/gelecek randevu</strong> ile sahte, ancak gerçekçi bir veri simülasyonu başlatıyorsunuz. İşletmenizdeki eski kayıtlar <u>tamamen sıfırlanacaktır</u>.
                 </p>
 
                 {status === "idle" && (
-                    <button
+                    <button 
                         onClick={handleSeed}
-                        className="w-full py-4 bg-[var(--color-primary)] text-white rounded-2xl font-bold shadow-lg shadow-[var(--color-primary)]/20 hover:opacity-90 transition-all"
+                        className="w-full bg-[#6832db] hover:bg-[#5729bc] text-white py-4 rounded-xl font-bold shadow-md transition-all active:scale-95 flex items-center justify-center gap-2"
                     >
-                        Demo Veri Ekle
+                        <span className="material-symbols-outlined">bolt</span>
+                        Veritabanını Sıfırla & Doldur
                     </button>
                 )}
 
                 {status === "loading" && (
-                    <div className="flex flex-col items-center gap-3 text-[var(--color-primary)]">
-                        <div className="size-8 border-4 border-[var(--color-primary)]/30 border-t-[var(--color-primary)] rounded-full animate-spin"></div>
-                        <p className="text-sm font-medium">Veriler oluşturuluyor, lütfen bekleyin...</p>
+                    <div className="flex flex-col items-center py-6">
+                        <span className="w-8 h-8 border-4 border-[#6832db] border-t-transparent rounded-full animate-spin mb-4"></span>
+                        <p className="font-bold text-slate-700 animate-pulse">Yeni İşletmeniz Yaratılıyor...</p>
+                        <p className="text-sm text-slate-500 mt-2">Bu işlem birkaç saniye sürebilir.</p>
                     </div>
                 )}
 
-                {status === "done" && (
-                    <div className="space-y-4">
-                        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-700 font-medium text-sm">
-                            {message}
-                        </div>
-                        <a href="/musteriler" className="block w-full py-3 bg-slate-100 text-slate-700 rounded-2xl font-bold hover:bg-slate-200 transition-all text-sm">
-                            Müşterileri Görüntüle →
-                        </a>
-                        <a href="/randevular" className="block w-full py-3 bg-[var(--color-primary)]/10 text-[var(--color-primary)] rounded-2xl font-bold hover:bg-[var(--color-primary)]/20 transition-all text-sm">
-                            Randevuları Görüntüle →
+                {status === "success" && (
+                    <div className="bg-emerald-50 border border-emerald-100 p-6 rounded-2xl flex flex-col items-center">
+                        <span className="material-symbols-outlined text-emerald-500 text-4xl mb-2">check_circle</span>
+                        <h3 className="font-bold text-emerald-800 mb-1">Simülasyon Aktif!</h3>
+                        <p className="text-sm text-emerald-600 mb-4">Veritabanınız başarıyla şekillendirildi.</p>
+                        <a href="/" className="px-6 py-2 bg-emerald-500 text-white font-bold rounded-xl hover:bg-emerald-600 transition-colors">
+                            Ana Ekrana Dön
                         </a>
                     </div>
                 )}
 
                 {status === "error" && (
-                    <div className="space-y-4">
-                        <div className="p-4 bg-red-50 border border-red-200 rounded-2xl text-red-700 font-medium text-sm">
-                            {message}
-                        </div>
-                        <button
-                            onClick={() => setStatus("idle")}
-                            className="w-full py-3 bg-slate-100 text-slate-700 rounded-2xl font-bold hover:bg-slate-200 transition-all text-sm"
-                        >
+                    <div className="bg-rose-50 border border-rose-100 p-6 rounded-2xl flex flex-col items-center">
+                        <span className="material-symbols-outlined text-rose-500 text-4xl mb-2">error</span>
+                        <h3 className="font-bold text-rose-800 mb-1">Hata Oluştu!</h3>
+                        <p className="text-sm text-rose-600 mb-4">{errmsg}</p>
+                        <button onClick={() => setStatus("idle")} className="px-6 py-2 bg-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-300 transition-colors">
                             Tekrar Dene
                         </button>
                     </div>
                 )}
-
-                <p className="mt-6 text-xs text-slate-400">
-                    ⚠️ Bu sayfayı yalnızca test aşamasında kullanın. Her çalıştırmada yeni kayıtlar eklenir.
-                </p>
             </div>
         </div>
     );

@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { createCampaign, updateCampaignStatus, previewCampaignTargets, deleteCampaign, updateCampaignDetails, getConvertedTargets } from "@/app/actions/campaigns";
+import { refreshAiInsight } from "@/app/actions/ai";
 import CustomerLink from "@/components/CustomerLink";
 
-export default function KampanyalarClient({ initialCampaigns }: { initialCampaigns: any[] }) {
+export default function KampanyalarClient({ initialCampaigns, initialSegment, initialParams }: { initialCampaigns: any[], initialSegment?: any, initialParams?: any }) {
     const [campaigns, setCampaigns] = useState(initialCampaigns);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
@@ -22,6 +23,14 @@ export default function KampanyalarClient({ initialCampaigns }: { initialCampaig
     const [reportData, setReportData] = useState<any[]>([]);
     const [isReportLoading, setIsReportLoading] = useState(false);
 
+    // Kitle Önizleme Modal State
+    const [isAudienceModalOpen, setIsAudienceModalOpen] = useState(false);
+    const [audienceModalData, setAudienceModalData] = useState<any[]>([]);
+    const [isAudienceLoading, setIsAudienceLoading] = useState(false);
+    const [audienceModalCampaign, setAudienceModalCampaign] = useState<any>(null);
+    const [audiencePage, setAudiencePage] = useState(1);
+    const AUDIENCE_PER_PAGE = 7; // Sayfa başına 7 kişi gösterilecek
+
     // Kaba Form Stateleri
     const [formData, setFormData] = useState({
         name: "",
@@ -36,7 +45,8 @@ export default function KampanyalarClient({ initialCampaigns }: { initialCampaig
         end_date: "",
         estimated_conversion_count: 0,
         expected_revenue_impact: 0,
-        channel: ["whatsapp"] // Array formatına alındı
+        channel: ["whatsapp"], // Array formatına alındı
+        message_content: ""
     });
 
     const resetForm = () => {
@@ -44,11 +54,41 @@ export default function KampanyalarClient({ initialCampaigns }: { initialCampaig
             name: "", description: "", type: "custom", target_segment: "risk", offer_type: "percentage_discount",
             offer_condition: "", offer_value: "", offer_details: "",
             start_date: new Date().toISOString().split("T")[0], end_date: "",
-            estimated_conversion_count: 0, expected_revenue_impact: 0, channel: ["whatsapp"]
+            estimated_conversion_count: 0, expected_revenue_impact: 0, channel: ["whatsapp"], message_content: ""
         });
         setCurrentStep(1);
         setEditingCampaignId(null);
     };
+
+    useEffect(() => {
+        const hasParams = initialParams && Object.keys(initialParams).length > 0;
+        if (initialSegment || hasParams) {
+            const targetSeg = initialSegment?.id || initialParams?.segment_id || "risk";
+            setFormData(prev => ({
+                ...prev,
+                name: initialParams?.concept_name || initialSegment?.name || "Özel Kampanya",
+                target_segment: targetSeg,
+                offer_type: initialParams?.offer_type || prev.offer_type,
+                offer_value: initialParams?.offer_value || prev.offer_value,
+                offer_condition: initialParams?.service_name || prev.offer_condition,
+                message_content: initialParams?.message_content || prev.message_content
+            }));
+            
+            if (initialSegment) {
+                setPreviewData({
+                    count: initialSegment.count,
+                    sample: initialSegment.sample
+                });
+            } else if (targetSeg) {
+                // initialSegment yoksa (built-in key geldi), preview'ı otomatik yükle
+                previewCampaignTargets(targetSeg)
+                    .then(res => setPreviewData(res))
+                    .catch(err => console.error("Preview yüklenemedi:", err));
+            }
+            setIsModalOpen(true);
+            setCurrentStep(1);
+        }
+    }, [initialSegment, initialParams]);
 
     const handleNextStep = async () => {
         if (currentStep === 1) {
@@ -170,6 +210,55 @@ export default function KampanyalarClient({ initialCampaigns }: { initialCampaig
         }
     };
 
+    const handleOpenAudiencePreview = async (campaign: any) => {
+        setAudienceModalCampaign(campaign);
+        setIsAudienceModalOpen(true);
+        setIsAudienceLoading(true);
+        setAudiencePage(1); // Modalı açarken ilk sayfaya sıfırla
+        try {
+            const res = await previewCampaignTargets(campaign.target_segment);
+            setAudienceModalData(res.sample || []);
+            setAudienceModalCampaign({...campaign, segment_real_name: res.name || segmentMap[campaign.target_segment] || (campaign.target_segment.includes('-') ? 'Yapay Zeka Hedef Kitlesi' : campaign.target_segment)});
+        } catch (err) {
+            console.error("Kitle okunamadı", err);
+        } finally {
+            setIsAudienceLoading(false);
+        }
+    };
+
+    // AI Message Generation State
+    const [isGeneratingMessage, setIsGeneratingMessage] = useState(false);
+    const [aiMessageVariants, setAiMessageVariants] = useState<any[]>([]);
+
+    const handleGenerateMessage = async () => {
+        setIsGeneratingMessage(true);
+        try {
+            const result = await refreshAiInsight("campaign_copy", {
+                campaign_name: formData.name,
+                segment: segmentMap[formData.target_segment] || formData.target_segment,
+                channel: formData.channel[0] || 'whatsapp',
+                service_name: formData.offer_condition || "Hizmetlerimiz",
+                discount_percent: formData.offer_type === 'percentage_discount' ? parseInt(formData.offer_value) : undefined
+            });
+
+            if (result.success && result.data?.texts) {
+                setAiMessageVariants(result.data.texts);
+            } else {
+                alert("AI metni üretilemedi: " + (result.error || "Bilinmeyen hata"));
+            }
+        } catch (error) {
+            console.error(error);
+            alert("AI hatası.");
+        } finally {
+            setIsGeneratingMessage(false);
+        }
+    };
+
+    const handleSelectVariant = (text: string) => {
+        setFormData(prev => ({ ...prev, message_content: text }));
+        setAiMessageVariants([]);
+    };
+
     // Metrikler
     const totalCampaigns = campaigns.length;
     const activeCampaigns = campaigns.filter(c => c.status === 'active').length;
@@ -180,6 +269,9 @@ export default function KampanyalarClient({ initialCampaigns }: { initialCampaig
     const segmentMap: Record<string, string> = {
         risk: "Riskli (90+ Günlük Kayıp)", new: "Yeni (1 Ziyaret)", loyal: "Sadık (3+ Ziyaret)", vip: "VIP Müşteriler", all: "Tüm Data"
     };
+    if (initialSegment) {
+        segmentMap[initialSegment.id] = `Özel Segment: ${initialSegment.name}`;
+    }
     const channelMap: Record<string, string> = {
         whatsapp: "WhatsApp", sms: "SMS", email: "E-Posta", push: "Anlık Bildirim", manual: "Manuel Liste"
     };
@@ -336,7 +428,11 @@ export default function KampanyalarClient({ initialCampaigns }: { initialCampaig
                                 <div className="mt-5 space-y-3">
                                     <div className="flex items-center gap-2 text-[12px] font-bold text-slate-700">
                                         <span className="material-symbols-outlined text-[16px] text-rose-500">group_add</span>
-                                        Hedef Kitle: <span className="text-[var(--color-primary)] bg-purple-50 px-2 py-0.5 rounded ml-auto">{camp.estimated_audience_count} Kişi</span>
+                                        Hedef Kitle: 
+                                        <button onClick={() => handleOpenAudiencePreview(camp)} className="text-[var(--color-primary)] bg-purple-50 hover:bg-purple-100 transition-colors px-2 py-0.5 rounded ml-auto border border-purple-200/50 cursor-pointer shadow-sm active:scale-95 flex items-center gap-1">
+                                            {camp.estimated_audience_count} Kişi
+                                            <span className="material-symbols-outlined text-[12px]">visibility</span>
+                                        </button>
                                     </div>
                                     <div className="flex items-center gap-2 text-[12px] font-medium text-slate-500 border-b border-slate-100 pb-3">
                                         <span className="material-symbols-outlined text-[16px] opacity-70">filter_alt</span>
@@ -521,6 +617,28 @@ export default function KampanyalarClient({ initialCampaigns }: { initialCampaig
                                     <p className="text-sm text-slate-500 font-medium">Bu kampanyanın hangi müşteri segmentine ulaşmasını istiyorsunuz?</p>
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        {initialSegment && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setFormData({ ...formData, target_segment: initialSegment.id });
+                                                    setPreviewData({ count: initialSegment.count, sample: initialSegment.sample });
+                                                }}
+                                                className={`p-4 rounded-xl border text-left transition-all col-span-1 md:col-span-2 ${formData.target_segment === initialSegment.id ? 'border-amber-500 bg-amber-50 shadow-sm ring-1 ring-amber-500' : 'border-amber-200 bg-amber-50/50 hover:border-amber-300'}`}
+                                            >
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <span className="material-symbols-outlined text-amber-500 text-[18px]">auto_awesome</span>
+                                                    <h5 className={`font-bold ${formData.target_segment === initialSegment.id ? 'text-amber-700' : 'text-amber-800'}`}>Yapay Zeka Hedef Kitlesi</h5>
+                                                </div>
+                                                <p className="text-[12px] text-amber-700/80 mb-2 font-medium">{initialSegment.name}</p>
+                                                <div className="flex items-center gap-1.5 flex-wrap">
+                                                    {initialSegment.sample?.slice(0, 3).map((s: any) => (
+                                                        <span key={s.id} className="text-[10px] bg-white px-2 py-0.5 rounded border border-amber-200 text-amber-600 font-bold">{s.name}</span>
+                                                    ))}
+                                                    {initialSegment.count > 3 && <span className="text-[10px] text-amber-600/60 font-bold">+{initialSegment.count - 3} kişi daha</span>}
+                                                </div>
+                                            </button>
+                                        )}
                                         {[
                                             { id: 'vip', label: 'VIP Müşteriler', desc: 'Sadece en çok harcama yapanlar' },
                                             { id: 'risk', label: 'Riskli (Gelmeyenler)', desc: 'Uzun süredir randevu almayanlar' },
@@ -591,6 +709,54 @@ export default function KampanyalarClient({ initialCampaigns }: { initialCampaig
                                                 </button>
                                             )
                                         })}
+                                    </div>
+
+                                    {/* MESAJ İÇERİĞİ VE AI */}
+                                    <div className="mt-8 pt-6 border-t border-slate-100">
+                                        <div className="flex items-center justify-between mb-3">
+                                            <h5 className="font-extrabold text-slate-700 text-sm">Kampanya Mesajı</h5>
+                                            <button 
+                                                type="button" 
+                                                onClick={handleGenerateMessage}
+                                                disabled={isGeneratingMessage || !formData.name}
+                                                className="flex items-center gap-1.5 bg-gradient-to-r from-purple-100 to-indigo-100 hover:from-purple-200 hover:to-indigo-200 text-purple-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-all disabled:opacity-50"
+                                            >
+                                                <span className={`material-symbols-outlined text-[16px] ${isGeneratingMessage ? 'animate-spin' : ''}`}>
+                                                    {isGeneratingMessage ? 'sync' : 'auto_awesome'}
+                                                </span>
+                                                AI ile Üret
+                                            </button>
+                                        </div>
+
+                                        {aiMessageVariants.length > 0 && (
+                                            <div className="mb-4 space-y-3 bg-purple-50 p-4 rounded-2xl border border-purple-100">
+                                                <p className="text-xs font-bold text-purple-700 uppercase tracking-widest mb-2">AI Tarafından Üretilen Seçenekler</p>
+                                                {aiMessageVariants.map((v, i) => (
+                                                    <div key={i} className="flex gap-3 bg-white p-3 rounded-xl border border-purple-100 shadow-sm relative group cursor-pointer hover:border-purple-300" onClick={() => handleSelectVariant(v.text)}>
+                                                        <div className="flex-1">
+                                                            <div className="flex items-center gap-2 mb-1">
+                                                                <span className="text-[10px] font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-500 uppercase">Varyant {v.variant}</span>
+                                                                <span className="text-[10px] font-bold text-purple-500 uppercase">{v.tone}</span>
+                                                            </div>
+                                                            <p className="text-sm text-slate-700 leading-relaxed italic">"{v.text}"</p>
+                                                        </div>
+                                                        <div className="shrink-0 flex items-center">
+                                                            <button type="button" className="w-8 h-8 rounded-full bg-purple-50 group-hover:bg-purple-600 group-hover:text-white flex items-center justify-center text-purple-400 transition-colors">
+                                                                <span className="material-symbols-outlined text-[18px]">touch_app</span>
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+
+                                        <textarea
+                                            value={formData.message_content || ""}
+                                            onChange={e => setFormData({ ...formData, message_content: e.target.value })}
+                                            className="w-full h-32 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:border-[var(--color-primary)] transition-all text-sm font-medium resize-none"
+                                            placeholder="Müşterilere gidecek mesaj veya E-posta içeriği..."
+                                        />
+                                        <p className="text-right text-[11px] font-bold text-slate-400 mt-1">{(formData.message_content || "").length} karakter</p>
                                     </div>
 
                                     {/* Basit Özet Kartı */}
@@ -725,6 +891,101 @@ export default function KampanyalarClient({ initialCampaigns }: { initialCampaig
                                         </tbody>
                                     </table>
                                 </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Kitle Önizleme Modalı */}
+            {isAudienceModalOpen && audienceModalCampaign && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">
+                    <div className="bg-white rounded-[32px] w-full max-w-xl shadow-2xl overflow-hidden my-8 scale-100 animate-in zoom-in-95 duration-200">
+                        <div className="px-8 py-6 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                            <div>
+                                <h3 className="text-xl font-extrabold text-slate-900 flex items-center gap-2">
+                                    <span className="material-symbols-outlined text-[var(--color-primary)]">groups</span>
+                                    Hedef Kitle Önizleme
+                                </h3>
+                                <p className="text-sm text-slate-500 font-medium mt-1">{audienceModalCampaign.name}</p>
+                            </div>
+                            <button onClick={() => setIsAudienceModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-all">
+                                <span className="material-symbols-outlined">close</span>
+                            </button>
+                        </div>
+
+                        <div className="p-8">
+                            <div className="bg-purple-50 p-4 rounded-2xl border border-purple-100 text-center mb-6">
+                                <p className="text-[10px] font-bold text-[var(--color-primary)] uppercase tracking-widest mb-1">Toplam Kitle Büyüklüğü</p>
+                                <p className="text-3xl font-black text-[var(--color-primary)]">{audienceModalCampaign.estimated_audience_count} <span className="text-xl">Kişi</span></p>
+                                <p className="text-xs font-semibold text-purple-700/70 mt-1">{audienceModalCampaign.segment_real_name}</p>
+                            </div>
+
+                            <h4 className="text-sm font-bold text-slate-800 uppercase tracking-widest mb-4">GÖNDERİLECEK KİŞİLER (Örnek Liste)</h4>
+
+                            {isAudienceLoading ? (
+                                <div className="py-12 flex justify-center">
+                                    <div className="w-8 h-8 rounded-full border-4 border-slate-200 border-t-[var(--color-primary)] animate-spin"></div>
+                                </div>
+                            ) : audienceModalData.length === 0 ? (
+                                <div className="py-12 text-center text-slate-500 bg-slate-50 rounded-2xl border border-slate-100 border-dashed">
+                                    <span className="material-symbols-outlined text-4xl mb-2 opacity-50">search_off</span>
+                                    <p className="font-medium text-sm">Bu kitleye uygun müşteri bulunamadı.</p>
+                                </div>
+                            ) : (
+                                <div>
+                                    <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                                        <table className="w-full text-left border-collapse bg-white">
+                                            <thead>
+                                                <tr className="bg-slate-50 text-[11px] uppercase tracking-widest text-slate-500 font-bold border-b border-slate-200">
+                                                    <th className="p-4 px-5">Müşteri Adı Soyadı</th>
+                                                    <th className="p-4 px-5">Telefon No</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="text-sm">
+                                                {audienceModalData.slice((audiencePage - 1) * AUDIENCE_PER_PAGE, audiencePage * AUDIENCE_PER_PAGE).map((row: any) => (
+                                                    <tr key={row.id} className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors last:border-0">
+                                                        <td className="p-4 px-5 font-bold text-slate-800">
+                                                            <CustomerLink
+                                                                id={row.id}
+                                                                firstName={row.name ? row.name.split(' ')[0] : row.first_name}
+                                                                lastName={row.name ? row.name.split(' ').slice(1).join(' ') : row.last_name}
+                                                            />
+                                                        </td>
+                                                        <td className="p-4 px-5 text-slate-600 font-medium">
+                                                            {row.phone || row.customers?.phone || "-"}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    
+                                    {Math.ceil(audienceModalData.length / AUDIENCE_PER_PAGE) > 1 && (
+                                        <div className="flex items-center justify-between mt-4 border-t border-slate-100 pt-4">
+                                            <button 
+                                                onClick={() => setAudiencePage(p => Math.max(1, p - 1))} 
+                                                disabled={audiencePage === 1}
+                                                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${audiencePage === 1 ? 'text-slate-300 bg-slate-50 cursor-not-allowed' : 'text-slate-600 bg-white border border-slate-200 hover:bg-slate-50'}`}
+                                            >
+                                                <span className="material-symbols-outlined text-[16px]">chevron_left</span> Önceki
+                                            </button>
+                                            <span className="text-xs font-bold text-slate-500">
+                                                Sayfa {audiencePage} / {Math.ceil(audienceModalData.length / AUDIENCE_PER_PAGE)}
+                                            </span>
+                                            <button 
+                                                onClick={() => setAudiencePage(p => Math.min(Math.ceil(audienceModalData.length / AUDIENCE_PER_PAGE), p + 1))} 
+                                                disabled={audiencePage === Math.ceil(audienceModalData.length / AUDIENCE_PER_PAGE)}
+                                                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${audiencePage === Math.ceil(audienceModalData.length / AUDIENCE_PER_PAGE) ? 'text-slate-300 bg-slate-50 cursor-not-allowed' : 'text-slate-600 bg-white border border-slate-200 hover:bg-slate-50'}`}
+                                            >
+                                                Sonraki <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                            {audienceModalData.length === 100 && (
+                                <p className="text-center text-xs text-slate-400 font-bold mt-4 italic">Liste sunucu performansı sebebiyle maksimum 100 kişi ile sınırlandırılmıştır.</p>
                             )}
                         </div>
                     </div>

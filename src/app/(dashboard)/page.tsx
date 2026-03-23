@@ -1,8 +1,11 @@
 import { getAppointments } from "@/app/actions/appointments";
 import { getCustomers } from "@/app/actions/customers";
 import { getBusinessProfile } from "@/app/actions/businesses";
+import { getAiInsight } from "@/app/actions/ai";
 import CustomerLink from "@/components/CustomerLink";
 import { ProductTour } from "@/components/layout/ProductTour";
+import { AiDailySummaryCard } from "@/components/ai/AiDailySummaryCard";
+import { createClient } from "@/utils/supabase/server";
 
 function getLocalIsoDate(date: Date) {
     const tzOffset = date.getTimezoneOffset() * 60000;
@@ -15,6 +18,14 @@ export default async function DashboardPage() {
     const appointments = await getAppointments();
     const customers = await getCustomers();
     const { data: business } = await getBusinessProfile();
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    const firstName = user?.user_metadata?.first_name || "Kullanıcı";
+
+    // AI Insight pre-fetch
+    const aiResult = await getAiInsight("daily_summary");
+    const aiInsight = aiResult.success && aiResult.data ? aiResult.data : null;
 
     const today = new Date();
     const todayStr = getLocalIsoDate(today);
@@ -24,10 +35,8 @@ export default async function DashboardPage() {
     const todayRevenue = todayAppointments.reduce((sum, a) => sum + (Number(a.total_price) || 0), 0);
     const todayMinutes = todayAppointments.reduce((sum, a) => sum + (Number(a.total_duration_minutes) || 0), 0);
 
-    // 2. Yeni Müşteriler (Son 30 gün doğumlu/kayıtlı)
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(today.getDate() - 30);
-    const newCustomersCount = customers.filter(c => new Date(c.created_at) >= thirtyDaysAgo).length;
+    // 2. Toplam Kayıtlı Müşteri
+    const totalCustomersCount = customers.length;
 
     // 3. Bugünkü Program (Saate göre sıralı ilk 5)
     const todaysSchedule = [...todayAppointments]
@@ -81,7 +90,7 @@ export default async function DashboardPage() {
             {/* Sayfa Başlığı */}
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
                 <div>
-                    <h2 className="text-[32px] font-extrabold text-slate-900 tracking-tight leading-tight">Merhaba, Elif Hanım</h2>
+                    <h2 className="text-[32px] font-extrabold text-slate-900 tracking-tight leading-tight">Merhaba, {firstName}</h2>
                     <p className="text-slate-400 mt-1 text-[15px]">Salonunuzun bugünkü performansına göz atın.</p>
                 </div>
                 <button className="flex items-center gap-2 px-5 py-2.5 bg-purple-50 text-[var(--color-primary)] font-bold text-sm rounded-[14px] hover:bg-purple-100 transition-all shadow-sm">
@@ -135,39 +144,14 @@ export default async function DashboardPage() {
                         </span>
                     </div>
                     <div className="z-10 mt-auto">
-                        <p className="text-slate-400 text-[10px] font-bold uppercase tracking-[0.1em] mb-1">YENİ MÜŞTERİLER</p>
-                        <h3 className="text-3xl font-black text-slate-900">{newCustomersCount}</h3>
+                        <p className="text-slate-400 text-[10px] font-bold uppercase tracking-[0.1em] mb-1">TOPLAM KAYITLI MÜŞTERİ</p>
+                        <h3 className="text-3xl font-black text-slate-900">{totalCustomersCount}</h3>
                     </div>
                 </div>
             </div>
 
-            {/* AI Asistan Odak Noktası */}
-            <div className="bg-gradient-to-br from-[#6832db] to-[#4c24a3] rounded-[32px] p-10 shadow-xl relative overflow-hidden text-white">
-                <div className="flex flex-col md:flex-row gap-10 items-center justify-between relative z-10">
-                    <div className="flex-1 space-y-5">
-                        <div className="flex items-center gap-2 text-white/80 font-bold uppercase tracking-widest text-[10px]">
-                            <span className="material-symbols-outlined text-[14px]">auto_awesome</span>
-                            AI İŞ BÜYÜTME ASİSTANI
-                        </div>
-                        <h3 className="text-3xl lg:text-4xl text-white font-extrabold tracking-tight">Bugünkü Odak Noktası</h3>
-                        <p className="text-white/80 text-[17px] leading-[1.6] font-light max-w-2xl">
-                            "Verilerimize göre Salı günleri öğleden sonra doluluk oranınız %40. Bugün <b>'Yenilenme Paketi'</b> için %15 indirimli SMS kampanyası çıkmak gelirinizi ortalama <b>₺1.200</b> artırabilir."
-                        </p>
-                        <div className="flex flex-wrap gap-4 pt-3">
-                            <button className="bg-white text-[#6832db] px-6 py-3 rounded-[14px] font-bold hover:bg-slate-50 shadow-md transition-all text-[15px]">
-                                Kampanyayı Başlat
-                            </button>
-                            <button className="bg-transparent text-white border border-white/30 px-6 py-3 rounded-[14px] font-bold hover:bg-white/10 transition-all text-[15px]">
-                                Detayları Gör
-                            </button>
-                        </div>
-                    </div>
-
-                    <div className="hidden md:flex w-72 aspect-square bg-white/5 rounded-3xl items-center justify-center border border-white/10 relative">
-                        <span className="material-symbols-outlined text-[100px] text-white/50 z-10 font-extralight">insights</span>
-                    </div>
-                </div>
-            </div>
+            {/* AI Günlük Özet Kartı */}
+            <AiDailySummaryCard initialInsight={aiInsight} isStale={aiResult.isStale} />
 
             {/* Alt 2 Kolon: Program & Extra İstatistikler */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">

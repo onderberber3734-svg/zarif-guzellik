@@ -1,0 +1,1 @@
+ALTER TABLE public.salons ADD COLUMN IF NOT EXISTS type VARCHAR(50) DEFAULT 'room';

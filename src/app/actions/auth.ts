@@ -3,7 +3,7 @@
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/server-admin";
 
-export async function signUp(formData: { email: string; password: string; businessName: string }) {
+export async function signUp(formData: { email: string; password: string; firstName: string; lastName: string }) {
     const supabase = await createClient();
 
     // Supabase Hata Mesajlarını Türkçeleştirme
@@ -25,6 +25,13 @@ export async function signUp(formData: { email: string; password: string; busine
     const { data: authData, error: authError } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
+        options: {
+            data: {
+                first_name: formData.firstName,
+                last_name: formData.lastName,
+                full_name: `${formData.firstName} ${formData.lastName}`
+            }
+        }
     });
 
     if (authError || !authData.user) {
@@ -37,9 +44,12 @@ export async function signUp(formData: { email: string; password: string; busine
     // Çünkü şu an kullanıcının sisteme yazma yetkisi (RLS) kısıtlıdır. Sadece Admin yazabilir.
     const adminSupabase = createAdminClient();
 
+    // İşletme adını geçici olarak ad soyad üzerinden oluşturıyoruz. Onboarding'de zaten asıl işletme adını alacağız.
+    const tempBusinessName = `${formData.firstName} ${formData.lastName} İşletmesi`;
+
     const { data: businessData, error: bizError } = await adminSupabase
         .from("businesses")
-        .insert([{ name: formData.businessName }])
+        .insert([{ name: tempBusinessName }])
         .select()
         .single(); // Oluşan kaydı döndürür ki business_id'yi alalım.
 
@@ -157,4 +167,14 @@ export async function signIn(formData: { email: string; password: string }) {
 export async function logOut() {
     const supabase = await createClient();
     await supabase.auth.signOut();
+}
+
+export async function updateUserProfile(data: { fullName: string }) {
+    const supabase = await createClient();
+    const { error } = await supabase.auth.updateUser({
+        data: { full_name: data.fullName }
+    });
+
+    if (error) return { success: false, error: error.message };
+    return { success: true };
 }

@@ -3,6 +3,8 @@
 @theme {
   --color-primary: #7f20df;
   --color-accent-pink: #fce7f3;
+  --color-accent-rose: #fecdd3;
+  --color-accent-lilac: #f3e8ff;
   --color-accent-beige: #f5f5f4;
   --color-background-light: #fafafa;
   --color-background-dark: #191121;
@@ -24,4 +26,25 @@
   }
 }
 
-@layer utilities {}
+@layer utilities {
+  .bg-gradient-onboarding {
+    background: radial-gradient(circle at top right, var(--color-accent-pink) 0%, var(--color-background-light) 50%, var(--color-accent-lilac) 100%);
+  }
+
+  .step-gradient {
+    background: linear-gradient(135deg, var(--color-primary) 0%, #a855f7 100%);
+  }
+
+  .drop-zone {
+    transition: all 0.3s ease;
+  }
+
+  .drop-zone:hover {
+    border-color: var(--color-primary);
+    background-color: rgba(127, 32, 223, 0.02);
+  }
+
+  .success-glow {
+    box-shadow: 0 0 50px 0 rgba(127, 32, 223, 0.2);
+  }
+}

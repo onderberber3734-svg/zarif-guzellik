@@ -1,4 +1,6 @@
-import { getServices } from "@/app/actions/services";
+import { getServices, getServiceCategories } from "@/app/actions/services";
+import { getSalons } from "@/app/actions/salons";
+import { getStaffList } from "@/app/actions/staff";
 import HizmetlerClient from "./HizmetlerClient";
 
 export const metadata = {
@@ -6,12 +8,15 @@ export const metadata = {
     description: "İşletmenizin hizmet kataloğu ve fiyat yönetimi."
 };
 
-// Next.js App Router: Server Component
-// Bu sayfa sunucuda çalışır, Supabase veritabanından güvenli şekilde RLS'e uğrayıp giriş yapan işletmenin hizmetlerini çeker.
 export default async function HizmetlerPage() {
-    // 1. Veritabanından (Supabase) Kullanıcının Hizmetlerini Çek (Server-Side)
-    const services = await getServices();
+    const [services, categories, salons, staffResult] = await Promise.all([
+        getServices(),
+        getServiceCategories(),
+        getSalons(),
+        getStaffList()
+    ]);
 
-    // 2. Client tarafındaki etkileşimli (interaktif) tablo bileşenine verileri aktar
-    return <HizmetlerClient initialServices={services} />;
+    const staffList = staffResult.success ? staffResult.data || [] : [];
+
+    return <HizmetlerClient initialServices={services} initialCategories={categories} salons={salons} staffList={staffList} />;
 }

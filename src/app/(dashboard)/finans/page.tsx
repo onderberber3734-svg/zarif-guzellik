@@ -1,16 +1,35 @@
-export default function FinansPage() {
+import { getFinanceSummary, getOutstandingPayments, getExpenses, getTopServices } from "@/app/actions/finance";
+import FinansClient from "./FinansClient";
+
+export const metadata = {
+  title: 'Kârlılık ve Finans - Zarif Güzellik Yönetim Modülü',
+  description: 'İşletme geliri, giderler ve tahsilat takibi.',
+}
+
+export default async function FinansPage() {
+    const today = new Date();
+    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+    const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
+
+    // Önce varsayılan olarak "Bu Ay" verilerini çekelim
+    const [summaryRes, outstandingRes, expensesRes, topServicesRes] = await Promise.all([
+        getFinanceSummary(firstDay, lastDay),
+        getOutstandingPayments(),
+        getExpenses(firstDay, lastDay),
+        getTopServices(firstDay, lastDay)
+    ]);
+
+    const summary = summaryRes.success ? summaryRes.data : null;
+    const outstanding = (outstandingRes.success && outstandingRes.data) ? outstandingRes.data : [];
+    const expenses = (expensesRes.success && expensesRes.data) ? expensesRes.data : [];
+    const topServices = (topServicesRes.success && topServicesRes.data) ? topServicesRes.data : [];
+
     return (
-        <div className="space-y-8">
-            <div className="flex justify-between items-end">
-                <div>
-                    <h2 className="text-3xl font-bold">Gelir ve Finans Yönetimi</h2>
-                    <p className="text-slate-500 mt-2">İşletmenizin karlılığını ve büyümesini analiz edin.</p>
-                </div>
-            </div>
-            <div className="bg-white rounded-3xl border border-slate-100 p-20 text-center text-slate-400">
-                <span className="material-symbols-outlined text-6xl mb-4 opacity-50">account_balance</span>
-                <p>Gelir tabloları ve performans grafikleri burada olacak.</p>
-            </div>
-        </div>
+        <FinansClient 
+            initialSummary={summary} 
+            initialOutstanding={outstanding} 
+            initialExpenses={expenses} 
+            initialTopServices={topServices} 
+        />
     );
 }
