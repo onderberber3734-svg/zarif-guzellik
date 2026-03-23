@@ -16,8 +16,8 @@ export async function GET() {
         results.push({
             type,
             success: res.success,
-            latency_ms: res.insight?.metadata?.latency_ms || (t1 - t0),
-            fallback: res.insight?.metadata?.provider_used === 'fallback',
+            latency_ms: (t1 - t0),
+            fallback: !!res.fallback,
             error: res.error
         });
     }
