@@ -153,6 +153,10 @@ function LoginGate({ children }: { children: React.ReactNode }) {
                         <span className="material-symbols-outlined text-[20px]">store</span>
                         İşletmeler
                     </a>
+                    <a href="/superyonetici" className="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl font-semibold transition-colors">
+                        <span className="material-symbols-outlined text-[20px]">group</span>
+                        Kullanıcılar
+                    </a>
                 </nav>
 
                 <div className="mt-auto pt-6 space-y-2 border-t border-slate-800">

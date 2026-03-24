@@ -833,6 +833,7 @@ export interface AiCampaignFilters {
     min_days_inactive?: number | null;
     max_days_inactive?: number | null;
     service_name_filter?: string | null;
+    exclude_service_name?: string | null;
     min_visits?: number | null;
     max_visits?: number | null;
     min_total_spent?: number | null;
@@ -845,22 +846,66 @@ async function filterCustomersByAiCriteria(
     filters: AiCampaignFilters
 ): Promise<{ audience: { id: string; name: string; score: number; daysSince: number }[]; stats: { total: number; excluded_active_plan: number; excluded_future_appt: number; filtered_out: number } }> {
 
+    // ═══ AYRI SORGULAR (nested join güvenilmez) ═══
+
+    // 1) Tüm müşteriler
     const { data: allCustomers } = await supabase
         .from("customers")
-        .select(`id, first_name, last_name, phone, appointments (id, appointment_date, status, total_price, appointment_services ( service_id, services:service_id (name) ))`)
+        .select("id, first_name, last_name, phone")
         .eq("business_id", businessId);
 
     if (!allCustomers || allCustomers.length === 0) {
         return { audience: [], stats: { total: 0, excluded_active_plan: 0, excluded_future_appt: 0, filtered_out: 0 } };
     }
 
-    // Aktif seans planları
+    // 2) Tüm randevular + hizmet bilgileri (2 kademe: appointments → appointment_services → services)
+    //    ÖNEMLİ: appointment_services tablosunda business_id yok!
+    //    Bu yüzden appointments tablosundan başlayarak nested select yapıyoruz.
+    const { data: allAppointments } = await supabase
+        .from("appointments")
+        .select("id, customer_id, appointment_date, status, total_price, appointment_services(service_id, services:service_id(name))")
+        .eq("business_id", businessId);
+
+    // 4) Aktif seans planları
     const { data: activePlans } = await supabase
         .from("session_plans")
         .select("customer_id, services:service_id (name)")
         .eq("business_id", businessId)
         .eq("status", "active");
 
+    // ═══ HARITALARI OLUŞTUR ═══
+
+    // appointment_id → hizmet adları listesi (allAppointments'ın nested appointment_services verisinden)
+    const apptServiceMap = new Map<string, string[]>();
+    let totalServiceLinks = 0;
+    (allAppointments || []).forEach((a: any) => {
+        const svcs: string[] = [];
+        (a.appointment_services || []).forEach((as: any) => {
+            const name = as.services?.name?.toLowerCase() || "";
+            if (name) {
+                svcs.push(name);
+                totalServiceLinks++;
+            }
+        });
+        if (svcs.length > 0) {
+            apptServiceMap.set(a.id, svcs);
+        }
+    });
+
+    // customer_id → randevu listesi (hizmet adlarıyla zenginleştirilmiş)
+    const customerApptMap = new Map<string, { id: string; date: string; status: string; price: number; services: string[] }[]>();
+    (allAppointments || []).forEach((a: any) => {
+        if (!customerApptMap.has(a.customer_id)) customerApptMap.set(a.customer_id, []);
+        customerApptMap.get(a.customer_id)!.push({
+            id: a.id,
+            date: a.appointment_date,
+            status: a.status,
+            price: Number(a.total_price) || 0,
+            services: apptServiceMap.get(a.id) || []
+        });
+    });
+
+    // customer_id → aktif seans planı hizmet adları
     const activePlanMap = new Map<string, string[]>();
     (activePlans || []).forEach((p: any) => {
         if (!activePlanMap.has(p.customer_id)) activePlanMap.set(p.customer_id, []);
@@ -868,89 +913,96 @@ async function filterCustomersByAiCriteria(
         if (sn) activePlanMap.get(p.customer_id)!.push(sn.toLowerCase());
     });
 
-    // Gelecek randevular
+    // Gelecek randevular → customer_id → hizmet adları
     const nowStr = new Date().toISOString().split("T")[0];
-    const { data: futureAppts } = await supabase
-        .from("appointments")
-        .select("customer_id, appointment_services(service_id, services:service_id(name))")
-        .eq("business_id", businessId)
-        .gte("appointment_date", nowStr)
-        .in("status", ["scheduled", "confirmed", "checked_in"]);
-
     const futureMap = new Map<string, string[]>();
-    (futureAppts || []).forEach((a: any) => {
-        if (!futureMap.has(a.customer_id)) futureMap.set(a.customer_id, []);
-        (a.appointment_services || []).forEach((as: any) => {
-            const sn = as.services?.name;
-            if (sn) futureMap.get(a.customer_id)!.push(sn.toLowerCase());
-        });
+    (allAppointments || []).forEach((a: any) => {
+        if (a.appointment_date >= nowStr && ["scheduled", "confirmed", "checked_in"].includes(a.status)) {
+            if (!futureMap.has(a.customer_id)) futureMap.set(a.customer_id, []);
+            const svcs = apptServiceMap.get(a.id) || [];
+            futureMap.get(a.customer_id)!.push(...svcs);
+        }
     });
 
+    // ═══ FİLTRELEME ═══
     const today = new Date();
     const audience: { id: string; name: string; score: number; daysSince: number }[] = [];
     let exPlan = 0, exFuture = 0, exFilter = 0;
     const svcFilter = filters.service_name_filter?.toLowerCase().trim() || null;
+    const excludeSvcFilter = filters.exclude_service_name?.toLowerCase().trim() || null;
+
+    console.log(`[AI-Filter] Filtreler:`, JSON.stringify(filters));
+    console.log(`[AI-Filter] Toplam müşteri: ${allCustomers.length}, randevu: ${(allAppointments||[]).length}, hizmet bağlantısı: ${totalServiceLinks}`);
 
     for (const c of allCustomers) {
-        const done = (c.appointments || []).filter((a: any) => a.status === "completed");
-        if (done.length === 0) { exFilter++; continue; }
+        const appts = customerApptMap.get(c.id) || [];
+        const done = appts.filter(a => a.status === "completed");
 
-        // EXCLUSION: Aktif seans planı & Gelecek randevu
-        // SADECE inaktif müşteri hedefleyen veya hizmet bazlı kampanyalarda uygula
-        // Genel kampanyalarda (referans, sadakat) aktif müşteriler zaten en iyi hedef
+        // Hiç completed randevusu yok → sadece geçmiş veriye ihtiyaç duyan filtreler varsa atla
+        const needsVisitHistory = (filters.min_days_inactive != null && filters.min_days_inactive > 0) || 
+                                   filters.min_visits != null || 
+                                   filters.min_total_spent != null ||
+                                   !!svcFilter;
+        if (done.length === 0 && needsVisitHistory) { exFilter++; continue; }
+
+        // ── EXCLUSION: Aktif seans planı & gelecek randevu ──
         const isTargetingInactive = filters.min_days_inactive != null && filters.min_days_inactive > 0;
-        const isServiceSpecific = !!svcFilter;
+        const isServiceSpecific = !!svcFilter || !!excludeSvcFilter;
         const shouldExcludeActive = isTargetingInactive || isServiceSpecific;
 
         if (shouldExcludeActive) {
-            // Aktif seans planı
+            const relevantSvc = svcFilter || excludeSvcFilter;
             if (activePlanMap.has(c.id)) {
                 const plans = activePlanMap.get(c.id)!;
-                if (svcFilter) {
-                    if (plans.some((s: string) => s.includes(svcFilter))) { exPlan++; continue; }
-                } else {
-                    exPlan++; continue;
-                }
+                if (relevantSvc) {
+                    if (plans.some(s => s.includes(relevantSvc))) { exPlan++; continue; }
+                } else { exPlan++; continue; }
             }
-
-            // Gelecek randevu
             if (futureMap.has(c.id)) {
                 const fsvcs = futureMap.get(c.id)!;
-                if (svcFilter) {
-                    if (fsvcs.some((s: string) => s.includes(svcFilter))) { exFuture++; continue; }
-                } else {
-                    exFuture++; continue;
-                }
+                if (relevantSvc) {
+                    if (fsvcs.some(s => s.includes(relevantSvc))) { exFuture++; continue; }
+                } else { exFuture++; continue; }
             }
         }
 
-        // min/max visits
+        // ── min/max visits ──
         if (filters.min_visits != null && done.length < filters.min_visits) { exFilter++; continue; }
         if (filters.max_visits != null && done.length > filters.max_visits) { exFilter++; continue; }
 
-        // min_total_spent
+        // ── min_total_spent ──
         if (filters.min_total_spent != null) {
-            const spent = done.reduce((s: number, a: any) => s + (Number(a.total_price) || 0), 0);
+            const spent = done.reduce((s, a) => s + a.price, 0);
             if (spent < filters.min_total_spent) { exFilter++; continue; }
         }
 
-        // Son randevu → kaç gündür gelmemiş
-        const sorted = [...done].sort((a: any, b: any) => new Date(b.appointment_date).getTime() - new Date(a.appointment_date).getTime());
-        const daysSince = Math.floor((today.getTime() - new Date(sorted[0].appointment_date).getTime()) / 86400000);
-
+        // ── Son ziyaret → kaç gün önceydi ──
+        let daysSince = 0;
+        if (done.length > 0) {
+            const sorted = [...done].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+            daysSince = Math.floor((today.getTime() - new Date(sorted[0].date).getTime()) / 86400000);
+        }
         if (filters.min_days_inactive != null && daysSince < filters.min_days_inactive) { exFilter++; continue; }
         if (filters.max_days_inactive != null && daysSince > filters.max_days_inactive) { exFilter++; continue; }
 
-        // service_name_filter: Bu hizmeti daha önce almış olmalı
+        // ── service_name_filter: Bu hizmeti ALMIŞ olmalı ──
         if (svcFilter) {
-            const has = done.some((a: any) => (a.appointment_services || []).some((as: any) => as.services?.name?.toLowerCase().includes(svcFilter)));
+            const allCustomerSvcs = appts.flatMap(a => a.services);
+            const has = allCustomerSvcs.some(s => s.includes(svcFilter));
             if (!has) { exFilter++; continue; }
         }
 
-        audience.push({ id: c.id, name: `${c.first_name || ""} ${c.last_name || ""}`.trim(), score: Math.min(100, daysSince), daysSince });
+        // ── exclude_service_name: Bu hizmeti HİÇ ALMMAMIŞ olmalı ──
+        if (excludeSvcFilter) {
+            const allCustomerSvcs = appts.flatMap(a => a.services);
+            const hasService = allCustomerSvcs.some(s => s.includes(excludeSvcFilter));
+            if (hasService) { exFilter++; continue; }
+        }
+
+        audience.push({ id: c.id, name: `${c.first_name || ""} ${c.last_name || ""}`.trim(), score: Math.min(100, Math.max(daysSince, 1)), daysSince });
     }
 
-    console.log(`[AI-Filter] ${allCustomers.length} müşteri → ${audience.length} eşleşti (hariç: ${exPlan} aktif plan, ${exFuture} gelecek randevu, ${exFilter} filtre)`);
+    console.log(`[AI-Filter] SONUÇ: ${allCustomers.length} müşteri → ${audience.length} eşleşti (hariç: ${exPlan} aktif plan, ${exFuture} gelecek randevu, ${exFilter} filtre)`);
     return { audience, stats: { total: allCustomers.length, excluded_active_plan: exPlan, excluded_future_appt: exFuture, filtered_out: exFilter } };
 }
 
@@ -984,7 +1036,7 @@ export async function createFilteredCampaignDraft(
     const businessId = businessUser.business_id;
 
     const { audience } = await filterCustomersByAiCriteria(supabase, businessId, filters);
-    if (audience.length === 0) throw new Error("Bu filtrelere uyan müşteri bulunamadı.");
+    if (audience.length === 0) return { success: false, error: "Bu filtrelere uyan müşteri bulunamadı. AI'a farklı kriterler söylemeyi deneyin." } as any;
 
     const internalAudience = audience.map(a => ({ id: a.id, score: a.score }));
     const segResult = await createSegmentFromAudience("ai_generated", `AI Chat: ${campaignInfo.concept_name}`, { filters: JSON.stringify(filters) }, internalAudience);

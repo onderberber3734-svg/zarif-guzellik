@@ -74,11 +74,14 @@ async function getBusinessScope() {
 function parseJsonSafe(text: string): any {
     let cleaned = text.trim();
     
+    // Markdown code block temizliği
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+    
     const firstBrace = cleaned.indexOf('{');
     const firstBracket = cleaned.indexOf('[');
     
     if (firstBrace === -1 && firstBracket === -1) {
-        return JSON.parse(cleaned); // Fallback to throw
+        throw new Error('No JSON object found in response');
     }
     
     let startIndex = 0;
@@ -96,7 +99,19 @@ function parseJsonSafe(text: string): any {
         cleaned = cleaned.substring(startIndex, endIndex + 1);
     }
     
-    return JSON.parse(cleaned);
+    // Kontrol karakterlerini temizle (tab, CR, LF string değer içinde sorun yaratabilir)
+    cleaned = cleaned.replace(/[\x00-\x1F\x7F]/g, (ch) => {
+        if (ch === '\n' || ch === '\r' || ch === '\t') return ' ';
+        return '';
+    });
+    
+    try {
+        return JSON.parse(cleaned);
+    } catch {
+        // Trailing comma sorunu olabilir
+        cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
+        return JSON.parse(cleaned);
+    }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -717,7 +732,14 @@ Aynı zamanda kampanya ve pazarlama konusunda uzmansın.
 - "Boş slot" → son 14-60 günde gelmiş aktif müşterilere anlık teklif
 - "Gelir artırma" → upsell / cross-sell
 - "Sadakat" → en sadık müşterilere VIP teklif (min_visits: 5+)
+- "Tüm müşteriler" → hiçbir filtre koyma veya çok geniş filtre (min_visits: 0 veya null)
 - KRİTİK: Tüm kampanyalar MEVCUT müşterilere gönderilir. DB dışı kişilere gönderilemez.
+
+## FİLTRE KULLANIMI (ÇOK ÖNEMLİ):
+- "X hizmeti almamış" / "X denememiş" / "hiç X almamış" → **exclude_service_name** kullan (örn: exclude_service_name: "cilt bakımı")
+- "X hizmeti almış" / "X denilmiş" → **service_name_filter** kullan  
+- "tüm müşterilerimize" / "herkese" / "bütün müşteriler" → hiçbir filtre koyma (hepsini null bırak)
+- Kullanıcı açıkça filtre belirtmediyse, mantıklı varsayılan koy ama çok daraltma
 
 ## İŞLETME VERİLERİ (Gerçek):
 - Toplam kayıtlı müşteri: ${totalCustomers || 0}
@@ -774,6 +796,7 @@ Kampanya modunda (kampanya isteniyorsa):
       "min_days_inactive": 120,
       "max_days_inactive": null,
       "service_name_filter": null,
+      "exclude_service_name": null,
       "min_visits": null,
       "max_visits": null,
       "min_total_spent": null
@@ -785,7 +808,24 @@ Kampanya modunda (kampanya isteniyorsa):
         const result = await runAI(prompt);
         console.log("[AiCampaignChat] Raw AI response:", result.payload?.substring(0, 500));
         
-        const parsed = parseJsonSafe(result.payload);
+        let parsed: any;
+        try {
+            parsed = parseJsonSafe(result.payload);
+        } catch (parseErr: any) {
+            // JSON parse başarısız oldu — raw text'i doğal yanıt olarak göster
+            console.warn("[AiCampaignChat] JSON parse failed, using raw text as reply:", parseErr.message);
+            const rawText = result.payload?.trim() || "";
+            // AI metin olarak yanıt vermiş olabilir, bunu direkt gösterelim
+            const cleanReply = rawText
+                .replace(/^```(?:json)?\s*/gi, '')
+                .replace(/\s*```$/gi, '')
+                .replace(/^[{\[][\s\S]*[}\]]$/, '') // pure JSON fail → boş bırak
+                .trim();
+            return {
+                success: true,
+                reply: cleanReply || "Anlıyorum, bu konuyu biraz daha açabilir misiniz? Size en uygun kampanyayı birlikte oluşturalım."
+            };
+        }
 
         return {
             success: true,
@@ -795,11 +835,23 @@ Kampanya modunda (kampanya isteniyorsa):
     } catch (err: any) {
         console.error("[AiCampaignChat] Error:", err.message || err);
         console.error("[AiCampaignChat] Error stack:", err.stack);
+        
+        // Kullanıcıya daha anlamlı fallback
+        if (err.message?.includes("zaman aşımı") || err.message?.includes("timeout") || err.message?.includes("AbortError")) {
+            return {
+                success: true,
+                reply: "Üzgünüm, isteğiniz biraz uzun sürdü. Lütfen sorunuzu biraz daha kısa yazıp tekrar deneyin. 🙏"
+            };
+        }
+        if (err.message?.includes("Rate limit") || err.message?.includes("429")) {
+            return {
+                success: true,
+                reply: "Şu an çok yoğunum! 😅 Birkaç saniye bekleyip tekrar dener misiniz?"
+            };
+        }
         return {
-            success: false,
-            error: err.message?.includes("zaman aşımı") 
-                ? "AI yanıt süresi doldu. Lütfen tekrar deneyin." 
-                : "AI yanıt üretemedi. Lütfen tekrar deneyin."
+            success: true,
+            reply: "Bir anlık teknik sorun yaşadım ama merak etmeyin! Sorunuzu tekrar yazarsanız hemen yanıtlayacağım. 🤖"
         };
     }
 }

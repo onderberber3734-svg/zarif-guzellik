@@ -50,7 +50,19 @@ export function AiCampaignChatCard() {
                 const parsed = JSON.parse(saved);
                 if (parsed.messages) setMessages(parsed.messages);
                 if (parsed.selectedGoal) setSelectedGoal(parsed.selectedGoal);
-                if (parsed.latestSuggestion) setLatestSuggestion(parsed.latestSuggestion);
+                if (parsed.latestSuggestion) {
+                    setLatestSuggestion(parsed.latestSuggestion);
+                    // Sayfa yenilenince preview'ı tekrar doğrula
+                    if (parsed.latestSuggestion.filters) {
+                        previewFilteredAudience(parsed.latestSuggestion.filters)
+                            .then(preview => {
+                                if (preview.success) {
+                                    setRealPreview({ count: preview.count, sample: preview.sample || [] });
+                                }
+                            })
+                            .catch(err => console.error("Hydration preview hatası:", err));
+                    }
+                }
             }
         } catch {}
         setIsHydrated(true);
@@ -88,19 +100,30 @@ export function AiCampaignChatCard() {
             setMessages(prev => [...prev, assistantMsg]);
             if (response.suggestion) {
                 setLatestSuggestion(response.suggestion);
+                setRealPreview(null); // önceki preview'ı sıfırla, yeni sorgu çalışacak
                 // AI filtreleriyle GERÇEK DB sorgusu çalıştır → gerçek kişi sayısı göster
                 if (response.suggestion.filters) {
                     previewFilteredAudience(response.suggestion.filters)
                         .then(preview => {
                             if (preview.success) {
                                 setRealPreview({ count: preview.count, sample: preview.sample || [] });
+                            } else {
+                                setRealPreview({ count: 0, sample: [] });
                             }
                         })
-                        .catch(err => console.error("Preview hatası:", err));
+                        .catch(err => {
+                            console.error("Preview hatası:", err);
+                            setRealPreview({ count: 0, sample: [] });
+                        });
                 }
             }
         } else {
-            setError(response.error || "Bir hata oluştu.");
+            // Hata olsa bile sohbete bir mesaj ekle, konuşma akışını bozma
+            const fallbackMsg: AiChatMessage = { 
+                role: "assistant", 
+                content: response.error || "Bir anlık teknik sorun yaşadım. Sorunuzu tekrar yazarsanız hemen yanıtlayacağım. 🤖" 
+            };
+            setMessages(prev => [...prev, fallbackMsg]);
         }
 
         setIsLoading(false);
@@ -116,11 +139,21 @@ export function AiCampaignChatCard() {
     // ═══ KAMPANYA OLUŞTUR — createFilteredCampaignDraft (AI filtreli gerçek segmentasyon) ═══
     const handleCreateCampaign = async () => {
         if (!latestSuggestion || isCreatingCampaign) return;
+        
+        // Preview yüklenmeden kampanya oluşturmayı engelle
+        if (!realPreview) {
+            setError("Hedef kitle doğrulanıyor, lütfen birkaç saniye bekleyin...");
+            return;
+        }
+        if (realPreview.count === 0) {
+            setError("Bu filtrelere uyan müşteri bulunamadı. Farklı kriterler deneyin.");
+            return;
+        }
+        
         setIsCreatingCampaign(true);
         setError("");
 
         try {
-            // AI'ın döndürdüğü filtreler → gerçek DB sorgusu yapılacak
             const filters = latestSuggestion.filters || {};
 
             const campaignInfo = {
@@ -134,7 +167,6 @@ export function AiCampaignChatCard() {
             const res = await createFilteredCampaignDraft(campaignInfo, filters);
 
             if (res.success && res.segment_id) {
-                // Kampanyalar sayfasına yönlendir (otomatik dolgulanmış form ile)
                 const params = new URLSearchParams();
                 params.set("segment_id", res.segment_id);
                 params.set("concept_name", campaignInfo.concept_name);
@@ -144,7 +176,7 @@ export function AiCampaignChatCard() {
                 params.set("message_content", campaignInfo.message_content);
                 router.push(`/kampanyalar?${params.toString()}`);
             } else {
-                setError("Kampanya oluşturulamadı.");
+                setError(res.error || "Kampanya oluşturulamadı. Farklı kriterler deneyin.");
             }
         } catch (err: any) {
             setError(err.message || "Kampanya oluşturulurken hata oluştu.");
@@ -303,8 +335,8 @@ export function AiCampaignChatCard() {
                                     </>
                                 ) : (
                                     <>
-                                        <p className="text-2xl font-extrabold">{latestSuggestion.estimated_reach}</p>
-                                        <p className="text-[10px] opacity-70">tahmini kişi</p>
+                                        <span className="material-symbols-outlined text-xl animate-spin opacity-70">progress_activity</span>
+                                        <p className="text-[10px] opacity-70">doğrulanıyor...</p>
                                     </>
                                 )}
                             </div>
@@ -358,16 +390,25 @@ export function AiCampaignChatCard() {
                         </div>
                         <button
                             onClick={handleCreateCampaign}
-                            disabled={isCreatingCampaign || (realPreview?.count === 0)}
+                            disabled={isCreatingCampaign || !realPreview || realPreview.count === 0}
                             className="w-full py-3.5 bg-white font-extrabold rounded-xl hover:bg-slate-50 transition-all flex items-center justify-center gap-2 text-sm cursor-pointer disabled:opacity-50 shadow-sm"
                             style={{ color: "var(--color-primary)" }}
                         >
                             {isCreatingCampaign ? (
                                 <span className="material-symbols-outlined text-base animate-spin">progress_activity</span>
+                            ) : !realPreview ? (
+                                <span className="material-symbols-outlined text-base animate-spin">progress_activity</span>
                             ) : (
                                 <span className="material-symbols-outlined text-base">campaign</span>
                             )}
-                            {isCreatingCampaign ? "Segment oluşturuluyor..." : realPreview ? `${realPreview.count} Kişiyle Kampanya Oluştur` : "Bu Kampanyayı Oluştur"}
+                            {isCreatingCampaign 
+                                ? "Segment oluşturuluyor..." 
+                                : !realPreview 
+                                    ? "Hedef kitle doğrulanıyor..."
+                                    : realPreview.count === 0
+                                        ? "Eşleşen müşteri yok"
+                                        : `${realPreview.count} Kişiyle Kampanya Oluştur`
+                            }
                         </button>
                     </div>
                 )}

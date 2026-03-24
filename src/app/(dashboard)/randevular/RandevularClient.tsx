@@ -434,6 +434,7 @@ function RandevularClientContent({ appointments, pendingSessions = [] }: Randevu
                                         startTransition={startTransition}
                                         liveTime={liveTime}
                                         onViewClick={setSelectedAppt}
+                                        pendingSessions={pendingSessions}
                                     />
                                 ))
                             )}

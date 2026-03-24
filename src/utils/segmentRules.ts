@@ -10,11 +10,13 @@ export const isVIPCustomer = (customer: any): boolean => {
 };
 
 export const isNewCustomer = (customer: any): boolean => {
-    // Yeni Müşteriler = son 30 günde eklenenler
+    // Yeni Müşteriler = son 30 günde eklenen VE henüz 1 veya daha az randevusu olan müşteriler
     if (!customer.created_at) return false;
     const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
     const createdMs = new Date(customer.created_at).getTime();
-    return (Date.now() - createdMs) <= thirtyDaysMs;
+    const isRecent = (Date.now() - createdMs) <= thirtyDaysMs;
+    const totalAppts = customer.stats?.totalAppointments || 0;
+    return isRecent && totalAppts <= 1;
 };
 
 export const isRiskGroup = (customer: any): boolean => {

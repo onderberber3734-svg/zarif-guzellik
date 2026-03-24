@@ -148,3 +148,63 @@ export async function deleteBusinessCompletely(businessId: string) {
         return { success: false, error: e.message };
     }
 }
+
+// ═══════════════════════════════════════════════════════
+// Tüm Auth Kullanıcılarını Listele
+// ═══════════════════════════════════════════════════════
+export async function getAllAuthUsers() {
+    const adminSupabase = createAdminClient();
+
+    try {
+        const { data, error } = await adminSupabase.auth.admin.listUsers({ perPage: 1000 });
+        if (error) return { success: false, error: error.message };
+
+        // business_users tablosundan her user_id'nin hangi işletmeye bağlı olduğunu çekelim
+        const { data: bizUsers } = await adminSupabase
+            .from("business_users")
+            .select("user_id, business_id, businesses(name)");
+
+        const bizMap: Record<string, string> = {};
+        (bizUsers || []).forEach((bu: any) => {
+            bizMap[bu.user_id] = bu.businesses?.name || bu.business_id;
+        });
+
+        const users = data.users.map((u: any) => ({
+            id: u.id,
+            email: u.email || "-",
+            phone: u.phone || "-",
+            first_name: u.user_metadata?.first_name || "-",
+            last_name: u.user_metadata?.last_name || "-",
+            business_name: bizMap[u.id] || "Bağlı değil",
+            created_at: u.created_at,
+            last_sign_in_at: u.last_sign_in_at,
+            provider: u.app_metadata?.provider || "email",
+        }));
+
+        return { success: true, data: users };
+    } catch (e: any) {
+        return { success: false, error: e.message };
+    }
+}
+
+// ═══════════════════════════════════════════════════════
+// Kullanıcı Şifresini Sıfırla (E-posta GEREKMEZ)
+// ═══════════════════════════════════════════════════════
+export async function resetUserPassword(userId: string, newPassword: string) {
+    const adminSupabase = createAdminClient();
+
+    try {
+        if (!newPassword || newPassword.length < 6) {
+            return { success: false, error: "Şifre en az 6 karakter olmalıdır." };
+        }
+
+        const { error } = await adminSupabase.auth.admin.updateUserById(userId, {
+            password: newPassword,
+        });
+
+        if (error) return { success: false, error: error.message };
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, error: e.message };
+    }
+}

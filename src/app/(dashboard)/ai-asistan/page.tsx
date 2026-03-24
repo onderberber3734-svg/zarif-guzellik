@@ -22,15 +22,20 @@ export default async function AiAsistanPage() {
     const emptySlotsInsight = emptySlotsRes.success && emptySlotsRes.data ? emptySlotsRes.data : null;
     const winbackInsight = winbackRes.success && winbackRes.data ? winbackRes.data : null;
 
-    // Sadece statüsü active veya published olanları alalım (Demo için ilk 5'i alalım)
+    // Aktif/yayında kampanyalar (gerçek DB verisi)
     const activeCampaigns = (campaignsData || [])
-        .filter((c: any) => c.status === "active" || c.status === "published")
+        .filter((c: any) => ["active", "published", "sending", "sent"].includes(c.status))
         .slice(0, 5)
         .map((c: any) => ({
             id: c.id,
             name: c.name,
             status: c.status,
-            channel: c.channel || 'SMS',
+            channel: Array.isArray(c.channel) ? c.channel[0] : (c.channel || "WhatsApp"),
+            estimated_audience_count: c.estimated_audience_count || 0,
+            send_status: c.send_status || "draft",
+            offer_type: c.offer_type || "",
+            offer_value: c.offer_details?.offer_value || "",
+            created_at: c.created_at,
         }));
 
     return (

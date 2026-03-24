@@ -7,28 +7,36 @@ interface Campaign {
     name: string;
     status: string;
     channel?: string;
-    revenue?: number;
-    performance?: number;
+    estimated_audience_count?: number;
+    send_status?: string;
+    offer_type?: string;
+    offer_value?: string;
+    created_at?: string;
+}
+
+const STATUS_MAP: Record<string, { label: string; bg: string; text: string; border: string }> = {
+    active:    { label: "AKTİF",    bg: "bg-amber-50",   text: "text-amber-600",   border: "border-amber-100/50" },
+    published: { label: "YAYINDA",  bg: "bg-emerald-50", text: "text-emerald-600", border: "border-emerald-100/50" },
+    sending:   { label: "GÖNDERİLİYOR", bg: "bg-blue-50", text: "text-blue-600", border: "border-blue-100/50" },
+    sent:      { label: "GÖNDERİLDİ", bg: "bg-purple-50", text: "text-purple-600", border: "border-purple-100/50" },
+    draft:     { label: "TASLAK",   bg: "bg-slate-50",   text: "text-slate-500",   border: "border-slate-100/50" },
+};
+
+const CHANNEL_ICONS: Record<string, { icon: string; color: string }> = {
+    whatsapp:  { icon: "chat",       color: "bg-green-400" },
+    sms:       { icon: "sms",        color: "bg-blue-400" },
+    instagram: { icon: "photo_camera", color: "bg-pink-400" },
+    email:     { icon: "mail",       color: "bg-indigo-400" },
+};
+
+function formatDate(dateStr?: string) {
+    if (!dateStr) return "—";
+    const d = new Date(dateStr);
+    return d.toLocaleDateString("tr-TR", { day: "numeric", month: "short", year: "numeric" });
 }
 
 export function ActiveCampaignsCard({ campaigns }: { campaigns: Campaign[] }) {
-    // Tasarımdaki statik örnek kampanyalar
-    const defaultCampaigns = [
-        { id: "1", name: "Churn Win-Back: Lazer", status: "YAYINDA", color: "emerald", channel: "SMS", channelColor: "blue", revenue: 12200, performance: 75 },
-        { id: "2", name: "Flash Deal: Yarın Öğleden Sonra", status: "AKTİF", color: "amber", channel: "Instagram", channelColor: "pink", revenue: 3450, performance: 40 }
-    ];
-
-    // Şimdilik demo veriler kullanılıyor (AI sistemi için), gerçek veri propstan maplenebilir
-    const displayCampaigns = campaigns.length > 0 ? campaigns.map(c => ({
-        id: c.id,
-        name: c.name,
-        status: c.status === "active" ? "AKTİF" : "YAYINDA", // statüye göre mapping
-        color: c.status === "active" ? "amber" : "emerald",
-        channel: "SMS", // DB'de kanal yoksa varsayılan
-        channelColor: "blue",
-        revenue: 0, 
-        performance: 50
-    })) : defaultCampaigns;
+    const hasCampaigns = campaigns.length > 0;
 
     return (
         <div className="space-y-6 h-full flex flex-col">
@@ -46,53 +54,58 @@ export function ActiveCampaignsCard({ campaigns }: { campaigns: Campaign[] }) {
             </div>
             
             <div className="bg-white rounded-[2.5rem] border border-slate-200/60 overflow-hidden shadow-[0_4px_20px_rgba(0,0,0,0.03)] flex-1 flex flex-col">
-                <div className="overflow-x-auto flex-1">
-                    <table className="w-full text-left min-w-[500px]">
-                        <thead className="bg-slate-50/50 border-b border-slate-100">
-                            <tr>
-                                <th className="px-8 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest">KAMPANYA & DURUM</th>
-                                <th className="px-6 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest">KANAL</th>
-                                <th className="px-6 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">GELİR</th>
-                                <th className="px-8 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">PERFORMANS</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-50">
-                            {displayCampaigns.map((camp) => (
-                                <tr key={camp.id} className="hover:bg-slate-50/30 transition-colors group">
-                                    <td className="px-8 py-6">
-                                        <p className="font-extrabold text-sm text-slate-800 mb-1.5 group-hover:text-purple-700 transition-colors">{camp.name}</p>
-                                        <span className={`text-[10px] px-2.5 py-1 bg-${camp.color === 'emerald' ? 'emerald' : 'amber'}-50 text-${camp.color === 'emerald' ? 'emerald' : 'amber'}-600 font-bold rounded-lg border border-${camp.color === 'emerald' ? 'emerald' : 'amber'}-100/50`}>
-                                            {camp.status}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-6">
-                                        <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 rounded-xl border border-slate-100`}>
-                                            <span className={`size-1.5 rounded-full bg-${camp.channelColor === 'blue' ? 'blue' : 'pink'}-400`}></span>
-                                            <span className="text-slate-600 text-[11px] font-bold">{camp.channel}</span>
-                                        </div>
-                                    </td>
-                                    <td className="px-6 py-6 text-center">
-                                        <p className="font-black text-base text-slate-900">₺{camp.revenue.toLocaleString('tr-TR')}</p>
-                                        <p className="text-[10px] text-emerald-500 font-bold mt-0.5">Kurtarılan</p>
-                                    </td>
-                                    <td className="px-8 py-6 text-right">
-                                        <div className="flex flex-col items-end gap-2">
-                                            <span className="text-[11px] font-black text-slate-400">%{camp.performance}</span>
-                                            <div className="w-24 bg-slate-100 h-2 rounded-full overflow-hidden border border-slate-200/50">
-                                                <div 
-                                                    className="bg-gradient-to-r from-purple-500 to-purple-700 h-full rounded-full transition-all duration-1000 shadow-[0_0_8px_rgba(168,85,247,0.3)]" 
-                                                    style={{ width: `${camp.performance}%` }}
-                                                ></div>
-                                            </div>
-                                        </div>
-                                    </td>
+                {hasCampaigns ? (
+                    <div className="overflow-x-auto flex-1">
+                        <table className="w-full text-left min-w-[500px]">
+                            <thead className="bg-slate-50/50 border-b border-slate-100">
+                                <tr>
+                                    <th className="px-8 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest">KAMPANYA & DURUM</th>
+                                    <th className="px-6 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest">KANAL</th>
+                                    <th className="px-6 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">HEDEFLENDİ</th>
+                                    <th className="px-8 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">TEKLİF</th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-                
-                {displayCampaigns.length === 0 && (
+                            </thead>
+                            <tbody className="divide-y divide-slate-50">
+                                {campaigns.map((camp) => {
+                                    const statusInfo = STATUS_MAP[camp.status] || STATUS_MAP.draft;
+                                    const channelKey = (camp.channel || "whatsapp").toLowerCase();
+                                    const channelInfo = CHANNEL_ICONS[channelKey] || CHANNEL_ICONS.whatsapp;
+
+                                    return (
+                                        <tr key={camp.id} className="hover:bg-slate-50/30 transition-colors group">
+                                            <td className="px-8 py-6">
+                                                <p className="font-extrabold text-sm text-slate-800 mb-1.5 group-hover:text-purple-700 transition-colors">{camp.name}</p>
+                                                <span className={`text-[10px] px-2.5 py-1 ${statusInfo.bg} ${statusInfo.text} font-bold rounded-lg border ${statusInfo.border}`}>
+                                                    {statusInfo.label}
+                                                </span>
+                                            </td>
+                                            <td className="px-6 py-6">
+                                                <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 rounded-xl border border-slate-100">
+                                                    <span className={`size-1.5 rounded-full ${channelInfo.color}`}></span>
+                                                    <span className="text-slate-600 text-[11px] font-bold capitalize">{camp.channel || "WhatsApp"}</span>
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-6 text-center">
+                                                <p className="font-black text-base text-slate-900">{camp.estimated_audience_count || 0}</p>
+                                                <p className="text-[10px] text-slate-400 font-bold mt-0.5">kişi</p>
+                                            </td>
+                                            <td className="px-8 py-6 text-right">
+                                                {camp.offer_value ? (
+                                                    <span className="inline-flex items-center gap-1 px-3 py-1.5 bg-purple-50 text-purple-700 rounded-xl text-[11px] font-bold border border-purple-100/50">
+                                                        <span className="material-symbols-outlined text-sm">local_offer</span>
+                                                        {camp.offer_type === "percentage_discount" ? `%${camp.offer_value} İndirim` : camp.offer_value}
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-[11px] text-slate-400">—</span>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                ) : (
                     <div className="p-16 text-center flex flex-col items-center justify-center flex-1">
                         <div className="size-16 bg-slate-50 rounded-3xl flex items-center justify-center mb-4 border border-slate-100 text-slate-300">
                             <span className="material-symbols-outlined text-3xl">campaign</span>
