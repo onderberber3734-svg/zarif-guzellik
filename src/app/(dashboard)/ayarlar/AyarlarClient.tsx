@@ -4,6 +4,7 @@ import { useState } from "react";
 import ProfilAyarlari from "./components/ProfilAyarlari";
 import IsletmeAyarlari from "./components/IsletmeAyarlari";
 import CalismaSaatleriAyarlari from "./components/CalismaSaatleriAyarlari";
+import WhatsAppAyarlari from "./components/WhatsAppAyarlari";
 
 export default function AyarlarClient({ user, business, initialWorkingHours }: any) {
     const [activeTab, setActiveTab] = useState("profil");
@@ -12,6 +13,7 @@ export default function AyarlarClient({ user, business, initialWorkingHours }: a
         { id: "profil", label: "Profilim", icon: "person" },
         { id: "isletme", label: "İşletme Bilgileri", icon: "store" },
         { id: "saatler", label: "Çalışma Saatleri", icon: "update" },
+        { id: "whatsapp", label: "WhatsApp", icon: "chat" },
         { id: "bildirimler", label: "Bildirimler", icon: "notifications" },
     ];
 
@@ -68,6 +70,10 @@ export default function AyarlarClient({ user, business, initialWorkingHours }: a
 
                         {activeTab === "saatler" && (
                             <CalismaSaatleriAyarlari initialHours={initialWorkingHours} />
+                        )}
+
+                        {activeTab === "whatsapp" && (
+                            <WhatsAppAyarlari />
                         )}
 
                         {activeTab === "bildirimler" && (

@@ -3,7 +3,7 @@
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/server-admin";
 
-export async function signUp(formData: { email: string; password: string; firstName: string; lastName: string }) {
+export async function signUp(formData: { email: string; password: string; firstName: string; lastName: string; businessName?: string }) {
     const supabase = await createClient();
 
     // Supabase Hata Mesajlarını Türkçeleştirme
@@ -44,8 +44,8 @@ export async function signUp(formData: { email: string; password: string; firstN
     // Çünkü şu an kullanıcının sisteme yazma yetkisi (RLS) kısıtlıdır. Sadece Admin yazabilir.
     const adminSupabase = createAdminClient();
 
-    // İşletme adını geçici olarak ad soyad üzerinden oluşturıyoruz. Onboarding'de zaten asıl işletme adını alacağız.
-    const tempBusinessName = `${formData.firstName} ${formData.lastName} İşletmesi`;
+    // İşletme adını geçici olarak ad soyad üzerinden oluşturuyoruz veya gelen bilgiyi kullanıyoruz.
+    const tempBusinessName = formData.businessName || `${formData.firstName} ${formData.lastName} İşletmesi`;
 
     const { data: businessData, error: bizError } = await adminSupabase
         .from("businesses")

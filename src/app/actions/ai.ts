@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 "use server";
 
 import { createClient } from "@/utils/supabase/server";
@@ -112,6 +114,58 @@ function parseJsonSafe(text: string): any {
         cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
         return JSON.parse(cleaned);
     }
+}
+
+const ISTANBUL_TIME_ZONE = "Europe/Istanbul";
+
+function formatIstanbulParts(date: Date) {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: ISTANBUL_TIME_ZONE,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23"
+    }).formatToParts(date);
+
+    const get = (type: string) => parts.find((part) => part.type === type)?.value || "00";
+
+    return {
+        year: get("year"),
+        month: get("month"),
+        day: get("day"),
+        hour: Number(get("hour")),
+        minute: Number(get("minute"))
+    };
+}
+
+function getIstanbulDateString(date: Date) {
+    const { year, month, day } = formatIstanbulParts(date);
+    return `${year}-${month}-${day}`;
+}
+
+function getIstanbulDateWithOffset(dateString: string, time = "12:00:00") {
+    return new Date(`${dateString}T${time}+03:00`);
+}
+
+function addDaysToIstanbulDate(dateString: string, days: number) {
+    const date = getIstanbulDateWithOffset(dateString);
+    date.setUTCDate(date.getUTCDate() + days);
+    return getIstanbulDateString(date);
+}
+
+function timeToMinutes(timeString?: string | null) {
+    if (!timeString) return 0;
+    const [hours, minutes] = timeString.substring(0, 5).split(":").map(Number);
+    return (hours * 60) + minutes;
+}
+
+function getIstanbulDayBounds(dateString: string) {
+    return {
+        start: `${dateString}T00:00:00+03:00`,
+        end: `${dateString}T23:59:59+03:00`
+    };
 }
 
 // ═══════════════════════════════════════════════════════
@@ -607,12 +661,192 @@ export interface AiChatResponse {
             min_days_inactive?: number | null;
             max_days_inactive?: number | null;
             service_name_filter?: string | null;
+            exclude_service_name?: string | null;
             min_visits?: number | null;
             max_visits?: number | null;
             min_total_spent?: number | null;
         };
     };
     error?: string;
+}
+
+function normalizeChatText(text: string) {
+    return text
+        .toLocaleLowerCase("tr-TR")
+        .replace(/[^\p{L}\p{N}\s]/gu, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function tokenizeChatText(text: string) {
+    return normalizeChatText(text)
+        .split(" ")
+        .filter((token) => token.length > 2);
+}
+
+function getTokenOverlapRatio(a: string, b: string) {
+    const aTokens = new Set(tokenizeChatText(a));
+    const bTokens = new Set(tokenizeChatText(b));
+
+    if (aTokens.size === 0 || bTokens.size === 0) return 0;
+
+    let overlap = 0;
+    for (const token of aTokens) {
+        if (bTokens.has(token)) overlap++;
+    }
+
+    return overlap / Math.min(aTokens.size, bTokens.size);
+}
+
+function isReplyTooSimilar(candidate: string, previousReplies: string[]) {
+    const normalizedCandidate = normalizeChatText(candidate);
+    if (!normalizedCandidate) return false;
+
+    return previousReplies.some((reply) => {
+        const normalizedReply = normalizeChatText(reply);
+        if (!normalizedReply) return false;
+        if (normalizedCandidate === normalizedReply) return true;
+        return getTokenOverlapRatio(candidate, reply) >= 0.82;
+    });
+}
+
+function pickVariant<T>(variants: T[], seed: number) {
+    return variants[Math.abs(seed) % variants.length];
+}
+
+function buildVariedCampaignReply(
+    suggestion: NonNullable<AiChatResponse["suggestion"]>,
+    seed: number
+) {
+    const target = suggestion.target_segment || "bu hedef kitle";
+    const offer = suggestion.offer || "özel teklif";
+    const channel = suggestion.channel || "WhatsApp";
+    const logic = suggestion.audience_logic || "bu grup kısa vadede en hızlı dönüş potansiyelini taşıyor";
+
+    const templates = [
+        `Bunu ${target} üzerinden kurgulamak mantıklı. ${offer} ile ilgiyi yükseltip ${channel} kanalında daha sıcak dönüş alabiliriz. Kitle seçimini de ${logic} diye temellendirdim.`,
+        `${target} için bu kampanya iyi oturuyor. Teklifi ${offer} seviyesinde tutup ${channel} ile hızlı aksiyon alabiliriz. Buradaki ana fikir şu: ${logic}.`,
+        `Bu senaryoda en doğru başlangıç ${target} kitlesi olur. ${offer} mesajı hem dikkat çeker hem de ${channel} tarafında uygulanması kolay kalır. Stratejik gerekçe de ${logic}.`,
+        `${target} tarafına odaklanırsak kampanya daha net çalışır. ${offer} avantajını ${channel} üzerinden sunup dönüş ihtimali yüksek bir kurgu çıkarabiliriz. Seçim nedeni kısaca ${logic}.`
+    ];
+
+    return pickVariant(templates, seed);
+}
+
+function buildVariedMessageDraft(
+    suggestion: NonNullable<AiChatResponse["suggestion"]>,
+    seed: number
+) {
+    const campaignName = suggestion.campaign_name || "özel kampanya";
+    const offer = suggestion.offer || "özel bir avantaj";
+    const target = suggestion.target_segment || "size uygun bakım";
+
+    const templates = [
+        `Merhaba {Müşteri_Adı}, ${campaignName} kapsamında size özel ${offer} tanımladık. ${target} için ayırdığımız bu fırsattan yararlanmak isterseniz size uygun bir saat planlayabiliriz.`,
+        `{Müşteri_Adı} merhaba, sizin için küçük ama etkili bir fırsat hazırladık. ${campaignName} ile ${target} tarafında ${offer} sunuyoruz. Uygunsa hemen size bir randevu oluşturalım.`,
+        `Selam {Müşteri_Adı}, size özel yeni bir teklifimiz var. ${campaignName} kapsamında ${target} için ${offer} avantajı açıldı. İsterseniz uygun saatleri birlikte netleştirelim.`,
+        `Merhaba {Müşteri_Adı}, ${target} için hazırladığımız ${campaignName} kampanyasında size özel ${offer} bulunuyor. Fırsat açıkken uygun bir gün belirleyip randevunuzu ayarlayabiliriz.`
+    ];
+
+    return pickVariant(templates, seed);
+}
+
+function hasRecentCampaignContext(history: AiChatMessage[] = [], goalType?: string | null) {
+    const recentContext = history
+        .slice(-4)
+        .map((message) => normalizeChatText(message.content))
+        .join(" ");
+
+    const contextKeywords = [
+        "kampanya",
+        "teklif",
+        "indirim",
+        "segment",
+        "hedef kitle",
+        "musterilere yaz",
+        "müşterilere yaz",
+        "slot",
+        "winback"
+    ];
+
+    if (contextKeywords.some((keyword) => recentContext.includes(normalizeChatText(keyword)))) {
+        return true;
+    }
+
+    return ["loyalty", "new", "slots", "revenue"].includes(goalType || "");
+}
+
+function isCampaignIntentMessage(message: string, goalType?: string | null, history?: AiChatMessage[]) {
+    const normalized = normalizeChatText(message);
+    const campaignKeywords = [
+        "kampanya",
+        "kampanya yap",
+        "kampanya olustur",
+        "kampanya oluştur",
+        "indirim",
+        "teklif",
+        "slot",
+        "bos takvim",
+        "boş takvim",
+        "winback",
+        "sadakat",
+        "gelir",
+        "musteri kazan",
+        "müşteri kazan",
+        "promosyon",
+        "whatsapp",
+        "sms",
+        "hedef kitle",
+        "segment",
+        "müşterilere yaz",
+        "musterilere yaz",
+        "mesaj hazirla",
+        "mesaj hazırla",
+        "duyuru yap"
+    ];
+
+    if (campaignKeywords.some((keyword) => normalized.includes(normalizeChatText(keyword)))) {
+        return true;
+    }
+
+    const followUpActionWords = [
+        "olustur",
+        "oluştur",
+        "hazirla",
+        "hazırla",
+        "yap",
+        "yapalim",
+        "yapalım",
+        "devam",
+        "tamam",
+        "olsun",
+        "evet"
+    ];
+
+    if (
+        followUpActionWords.some((keyword) => normalized.includes(normalizeChatText(keyword))) &&
+        hasRecentCampaignContext(history, goalType)
+    ) {
+        return true;
+    }
+
+    if (!goalType) return false;
+
+    const goalSignals = {
+        loyalty: ["sadakat", "ödül", "odul", "vip"],
+        new: ["yeni müşteri", "yeni musteri", "referans"],
+        slots: ["slot", "boş", "bos", "takvim"],
+        revenue: ["gelir", "upsell", "cross sell", "çapraz satış", "capraz satis"]
+    } as const;
+
+    const signals = goalSignals[goalType as keyof typeof goalSignals] || [];
+    return signals.some((keyword) => normalized.includes(normalizeChatText(keyword))) && (
+        normalized.includes("yap") ||
+        normalized.includes("oluştur") ||
+        normalized.includes("olustur") ||
+        normalized.includes("hazırla") ||
+        normalized.includes("hazirla")
+    );
 }
 
 export async function aiCampaignChat(
@@ -713,6 +947,32 @@ export async function aiCampaignChat(
         .map(m => `${m.role === "user" ? "KULLANICI" : "ASISTAN"}: ${m.content}`)
         .join("\n");
 
+    const recentAssistantReplies = (history || [])
+        .filter((message) => message.role === "assistant")
+        .slice(-3)
+        .map((message) => message.content)
+        .filter(Boolean);
+
+    const repeatedAskCount = (history || [])
+        .filter((message) => message.role === "user")
+        .map((message) => normalizeChatText(message.content))
+        .filter((content) => content === normalizeChatText(userMessage))
+        .length;
+
+    const variationModes = [
+        "danisman_uslubu",
+        "daha_sicak_ve_kisa",
+        "premium_ve_zarif",
+        "daha_direkt_aksiyon_odakli"
+    ] as const;
+    const variationSeed = recentAssistantReplies.length + repeatedAskCount + userMessage.length;
+    const variationMode = pickVariant([...variationModes], variationSeed);
+    const bannedOpenings = recentAssistantReplies
+        .map((reply) => reply.split(/[.!?]/)[0]?.trim())
+        .filter(Boolean)
+        .slice(-3)
+        .join(" | ");
+
     // Hizmet listesi (AI'ın filtre yazarken doğru hizmet adını kullanabilmesi için)
     const serviceList = (services || []).map((s: any) => `${s.name} (₺${s.price})`).join(", ");
 
@@ -755,6 +1015,13 @@ Aynı zamanda kampanya ve pazarlama konusunda uzmansın.
 ## MEVCUT KONUŞMA GEÇMİŞİ:
 ${historyBlock || "(Bu ilk mesaj)"}
 
+## YANIT VARYASYON MODU:
+- Bu cevap için stil: ${variationMode}
+- Son asistan cevaplarındaki açılışları tekrar etme: ${bannedOpenings || "yok"}
+- Kullanıcı aynı isteği tekrar etse bile strateji aynı kalabilir ama cümle kuruluşu, açılış ifadesi ve ritim farklı olmalı
+- Özellikle "Harika bir fikir!" gibi aynı giriş cümlesini art arda kullanma
+- Kampanya modunda "message_draft" da her seferinde yeni bir metin şablonuyla yazılmalı; teklif aynı olsa bile metin iskeleti değişmeli
+
 ## KULLANICININ KAMPANYA HEDEFİ TÜRÜ: ${goalType || "belirtilmedi"}
 
 ## KULLANICININ YENİ MESAJI:
@@ -771,6 +1038,8 @@ KURALLAR:
    - filters: kullanıcı belirtmediyse hedefe göre mantıklı varsayılan koy
    - estimated_reach > 0 olmalı
    - "5 ay gelmemiş" → min_days_inactive: 150 gibi dönüştür
+   - "reply" kısmı son 3 asistan cevabından ton ve açılış olarak belirgin şekilde farklı olmalı
+   - "message_draft" düz, kopya veya tekrar eden şablon gibi hissettirmemeli
 
 Yanıtını SADECE aşağıdaki JSON formatında döndür:
 
@@ -828,9 +1097,43 @@ Kampanya modunda (kampanya isteniyorsa):
         }
 
         return {
+            ...(parsed.suggestion && !isCampaignIntentMessage(userMessage, goalType, history) ? {
+                success: true,
+                reply: parsed.reply || "Anladım. Bu soru kampanya akışından çok operasyonel bilgi tarafında duruyor, istersen buna göre net cevaplayayım.",
+                suggestion: undefined
+            } : {
             success: true,
-            reply: parsed.reply || "Kampanya öneriniz üzerinde çalışıyorum. Biraz daha detay verebilir misiniz?",
-            suggestion: parsed.suggestion || undefined
+            reply: (() => {
+                const defaultReply = "Kampanya öneriniz üzerinde çalışıyorum. Biraz daha detay verebilir misiniz?";
+                const parsedReply = parsed.reply || defaultReply;
+                const suggestion = parsed.suggestion as AiChatResponse["suggestion"] | undefined;
+
+                if (suggestion && (repeatedAskCount > 0 || isReplyTooSimilar(parsedReply, recentAssistantReplies))) {
+                    return buildVariedCampaignReply(
+                        suggestion as NonNullable<AiChatResponse["suggestion"]>,
+                        variationSeed
+                    );
+                }
+
+                return parsedReply;
+            })(),
+            suggestion: (() => {
+                const suggestion = parsed.suggestion as AiChatResponse["suggestion"] | undefined;
+                if (!suggestion) return undefined;
+
+                if (repeatedAskCount > 0) {
+                    return {
+                        ...suggestion,
+                        message_draft: buildVariedMessageDraft(
+                            suggestion as NonNullable<AiChatResponse["suggestion"]>,
+                            variationSeed + 1
+                        )
+                    };
+                }
+
+                return suggestion;
+            })()
+            })
         };
     } catch (err: any) {
         console.error("[AiCampaignChat] Error:", err.message || err);
@@ -872,8 +1175,9 @@ function maskName(firstName?: string, lastName?: string, id?: string) {
 
 async function collectDailySummaryData(supabase: any, businessId: string) {
     const today = new Date();
-    const todayStr = today.toISOString().split("T")[0];
-    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split("T")[0];
+    const todayStr = getIstanbulDateString(today);
+    const todayParts = formatIstanbulParts(today);
+    const monthStart = `${todayParts.year}-${todayParts.month}-01`;
 
     // Bugünkü randevular
     const { data: todayAppts } = await supabase
@@ -888,8 +1192,7 @@ async function collectDailySummaryData(supabase: any, businessId: string) {
         .reduce((sum: number, a: any) => sum + (Number(a.total_price) || 0), 0);
 
     // Bugünkü tahsilatlar
-    const startOfDay = new Date(todayStr + "T00:00:00").toISOString();
-    const endOfDay = new Date(todayStr + "T23:59:59").toISOString();
+    const { start: startOfDay, end: endOfDay } = getIstanbulDayBounds(todayStr);
     const { data: todayPayments } = await supabase
         .from("payments")
         .select("amount")
@@ -915,20 +1218,29 @@ async function collectDailySummaryData(supabase: any, businessId: string) {
     // Geciken seanslar (Mevcut bir planın tarihi geçmişse ve İLERİ TARİHLİ RANDEVUSU YOKSA gecikmiştir)
     const { data: overduePlans } = await supabase
         .from("session_plans")
-        .select("id, appointments:appointments!session_plan_id(id, status, appointment_date)")
+        .select(`
+            id,
+            appointment_services (
+                appointments:appointment_id (
+                    id,
+                    status,
+                    appointment_date
+                )
+            )
+        `)
         .eq("business_id", businessId)
         .eq("status", "active")
         .lt("next_recommended_date", todayStr);
 
     let overdueCount = 0;
     (overduePlans || []).forEach((p: any) => {
-        const hasUpcoming = p.appointments?.some((a: any) => {
-            if (a.status === "cancelled") return false;
-            // Eger statu tamamlanmis olsa bile, eger ileri tarihe bir randevu atmislarsa (nadir case) 
-            // ya da scheduled durumundaysa geciken saymayiz.
-            return new Date(a.appointment_date) >= new Date(todayStr);
+        const hasUpcoming = (p.appointment_services || []).some((appointmentService: any) => {
+            const appointment = appointmentService.appointments;
+            if (!appointment) return false;
+            if (appointment.status === "canceled" || appointment.status === "no_show") return false;
+            return appointment.appointment_date >= todayStr;
         });
-        
+
         if (!hasUpcoming) {
             overdueCount++;
         }
@@ -969,58 +1281,68 @@ async function collectDailySummaryData(supabase: any, businessId: string) {
 
 async function collectEmptySlotsData(supabase: any, businessId: string) {
     const today = new Date();
-    const nextWeek = new Date(today);
-    nextWeek.setDate(nextWeek.getDate() + 7);
-
-    const todayStr = today.toISOString().split("T")[0];
-    const nextWeekStr = nextWeek.toISOString().split("T")[0];
+    const todayStr = getIstanbulDateString(today);
+    const nextWeekStr = addDaysToIstanbulDate(todayStr, 6);
 
     // Önümüzdeki 7 günün randevuları
     const { data: appts } = await supabase
         .from("appointments")
-        .select("appointment_date, appointment_time, total_duration_minutes")
+        .select("appointment_date, appointment_time, total_duration_minutes, status")
         .eq("business_id", businessId)
         .gte("appointment_date", todayStr)
         .lte("appointment_date", nextWeekStr)
-        .not("status", "in", "(canceled,no_show)");
+        .in("status", ["scheduled", "checked_in"]);
 
-    const formatIstanbulDate = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Istanbul', year: 'numeric', month: '2-digit', day: '2-digit' });
-    const formatIstanbulTime = new Intl.DateTimeFormat('tr-TR', { timeZone: 'Europe/Istanbul', hour: '2-digit', minute: '2-digit', hour12: false });
-    
-    const nowLocalStr = formatIstanbulDate.format(today);
-    const nowTimeStr = formatIstanbulTime.format(today);
-    const [nowH, nowM] = nowTimeStr.split(":").map(Number);
+    const nowParts = formatIstanbulParts(today);
+    const nowLocalStr = todayStr;
+    const nowH = nowParts.hour;
+    const nowM = nowParts.minute;
     const nowTotalMin = nowH * 60 + nowM;
 
     // Saat 12:00'den sonraysa bugünü (0. gün) atla
     const skipToday = nowH >= 12;
 
-    // Basit boş slot hesaplaması (her gün 09:00-18:00)
+    const { data: workingHours } = await supabase
+        .from("business_working_hours")
+        .select("day_of_week, is_closed, start_time, end_time, break_start, break_end")
+        .eq("business_id", businessId);
+
     let slots: { date: string; time: string }[] = [];
-    const workHours = ["09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00"];
 
     for (let d = 0; d < 7; d++) {
-        const date = new Date(today);
-        date.setDate(date.getDate() + d);
-        const dateStr = date.toISOString().split("T")[0]; // DB UTC is fine to query DB, but we check against logic
+        const dateStr = addDaysToIstanbulDate(todayStr, d);
 
         if (d === 0 && skipToday) continue;
 
-        const dayAppts = (appts || []).filter((a: any) => a.appointment_date === dateStr);
-        const bookedHours = dayAppts.map((a: any) => a.appointment_time?.substring(0, 5));
+        const dayOfWeek = getIstanbulDateWithOffset(dateStr).getUTCDay();
+        const dayHours = (workingHours || []).find((item: any) => item.day_of_week === dayOfWeek);
+        if (!dayHours || dayHours.is_closed) continue;
 
-        for (const hour of workHours) {
-            if (!bookedHours.includes(hour)) {
-                // Eger bugunse ve saat gectiyse (60 dk buffer) ekleme
-                if (dateStr === nowLocalStr) {
-                    const [sh, sm] = hour.split(":").map(Number);
-                    const slotMin = sh * 60 + sm;
-                    if (slotMin <= nowTotalMin + 60) {
-                        continue; // Skip past or too close slots
-                    }
-                }
-                slots.push({ date: dateStr, time: hour });
+        const shiftStart = timeToMinutes(dayHours.start_time || "09:00");
+        const shiftEnd = timeToMinutes(dayHours.end_time || "18:00");
+        const breakStart = dayHours.break_start ? timeToMinutes(dayHours.break_start) : null;
+        const breakEnd = dayHours.break_end ? timeToMinutes(dayHours.break_end) : null;
+
+        const dayAppts = (appts || []).filter((a: any) => a.appointment_date === dateStr);
+        const bookedIntervals: { start: number; end: number }[] = dayAppts.map((appointment: any) => {
+            const start = timeToMinutes(appointment.appointment_time);
+            const end = start + (Number(appointment.total_duration_minutes) || 0);
+            return { start, end };
+        });
+
+        for (let slotStart = shiftStart; slotStart + 60 <= shiftEnd; slotStart += 60) {
+            if (breakStart !== null && breakEnd !== null && slotStart < breakEnd && (slotStart + 60) > breakStart) {
+                continue;
             }
+
+            if (dateStr === nowLocalStr && slotStart <= nowTotalMin + 60) continue;
+
+            const hasConflict = bookedIntervals.some((interval) => slotStart < interval.end && (slotStart + 60) > interval.start);
+            if (hasConflict) continue;
+
+            const slotHours = String(Math.floor(slotStart / 60)).padStart(2, "0");
+            const slotMinutes = String(slotStart % 60).padStart(2, "0");
+            slots.push({ date: dateStr, time: `${slotHours}:${slotMinutes}` });
         }
     }
 
@@ -1058,8 +1380,9 @@ async function collectEmptySlotsData(supabase: any, businessId: string) {
     
     const { data: topAppts } = await supabase
         .from("appointment_services")
-        .select("service_id, appointments!inner(business_id, appointment_date)")
+        .select("service_id, appointments!inner(business_id, appointment_date, status)")
         .eq("appointments.business_id", businessId)
+        .eq("appointments.status", "completed")
         .gte("appointments.appointment_date", thirtyAgoStr);
         
     const serviceCounts = (topAppts || []).reduce((acc: any, row: any) => {
@@ -1073,11 +1396,9 @@ async function collectEmptySlotsData(supabase: any, businessId: string) {
         .map(entry => servicesData.find((s: any) => s.id === entry[0])?.name)
         .filter(Boolean);
 
-    const randomService = servicesData[Math.floor(Math.random() * servicesData.length)];
-
     // 3) Gecikmiş Seans Planları — Overdue session reminders için GERÇEK veri
     // next_recommended_date geçmiş ama HENÜZ gelecek randevusu OLMAYAN planlar
-    const currentDateStr = new Date().toISOString().split("T")[0];
+    const currentDateStr = todayStr;
     const { data: overduePlans } = await supabase
         .from("session_plans")
         .select(`
@@ -1103,7 +1424,7 @@ async function collectEmptySlotsData(supabase: any, businessId: string) {
             const apt = as.appointments;
             if (!apt) return false;
             return apt.appointment_date >= currentDateStr && 
-                   (apt.status === 'scheduled' || apt.status === 'confirmed' || apt.status === 'checked_in');
+                   (apt.status === 'scheduled' || apt.status === 'checked_in');
         });
 
         // Zaten gelecek randevusu varsa, bu plan gerçekten gecikmiş DEĞİL
@@ -1129,6 +1450,7 @@ async function collectEmptySlotsData(supabase: any, businessId: string) {
     return {
         empty_slots: targetSlots, 
         base_audience: audience,
+        audience_count: audience.length,
         audience_reason_summary: [
             summary,
             audience.length > 0 ? "Yapay zeka bu temel kitle üzerinden hizmet bazlı son filtrelemeleri yapacak." : "Genel müşteri havuzu taranmaktadır.",

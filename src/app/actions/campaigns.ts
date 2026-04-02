@@ -38,6 +38,21 @@ export async function getCampaigns() {
 export async function getCampaignById(id: string) {
     const supabase = await createClient();
 
+    const { data: userResponse, error: userError } = await supabase.auth.getUser();
+    if (userError || !userResponse?.user) {
+        return null;
+    }
+
+    const { data: businessUser, error: businessError } = await supabase
+        .from("business_users")
+        .select("business_id")
+        .eq("user_id", userResponse.user.id)
+        .single();
+
+    if (businessError || !businessUser?.business_id) {
+        return null;
+    }
+
     const { data: campaign, error } = await supabase
         .from('campaigns')
         .select(`
@@ -48,6 +63,7 @@ export async function getCampaignById(id: string) {
             )
         `)
         .eq('id', id)
+        .eq('business_id', businessUser.business_id)
         .single();
 
     if (error) {
@@ -639,7 +655,7 @@ export async function evaluateCampaignExclusions(baseAudience: any[], serviceId:
     const activePlanCusts = new Set((activePlans || []).map((p: any) => p.customer_id));
 
     // D) Planned/Upcoming Appointment Exclusion — İleri tarihli randevusu olan müşteriler (ilişkili TÜM service_id'ler)
-    const todayStr = new Date().toISOString().split("T")[0];
+    const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Istanbul" });
     const { data: plannedAppts } = await supabase
         .from('appointments')
         .select(`
@@ -647,7 +663,7 @@ export async function evaluateCampaignExclusions(baseAudience: any[], serviceId:
             appointment_services (service_id)
         `)
         .eq('business_id', businessId)
-        .in('status', ['scheduled', 'confirmed'])
+        .in('status', ['scheduled', 'checked_in'])
         .gte('appointment_date', todayStr);
 
     const plannedSameServiceCusts = new Set<string>();
@@ -740,10 +756,12 @@ export async function createDraftFromAi(alternative: any) {
 
     // 1) Kitle belirleme: Reminder mı yoksa normal kampanya mı?
     let audience: any[] = [];
+    const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Istanbul" });
+    const validDates = Array.isArray(alternative.valid_dates) ? alternative.valid_dates : [];
 
     if (alternative.offer_type === 'reminder') {
         // Reminder tipi: Gerçekten gecikmiş (gelecek randevusu OLMAYAN) müşterileri kullan
-        const currentDate = new Date().toISOString().split("T")[0];
+        const currentDate = todayStr;
         const { data: overduePlans } = await supabase
             .from("session_plans")
             .select(`
@@ -763,7 +781,7 @@ export async function createDraftFromAi(alternative: any) {
             const hasFutureAppt = (p.appointment_services || []).some((as: any) => {
                 const apt = as.appointments;
                 return apt && apt.appointment_date >= currentDate && 
-                       (apt.status === 'scheduled' || apt.status === 'confirmed');
+                       (apt.status === 'scheduled' || apt.status === 'checked_in');
             });
             if (hasFutureAppt) return false;
             
@@ -774,9 +792,14 @@ export async function createDraftFromAi(alternative: any) {
         }).map((p: any) => ({ id: p.customer_id, score: 100 }));
     } else {
         // Normal kampanya: exclusion kurallarını uygula
-        const today = new Date();
-        const todayStr = today.toISOString().split("T")[0];
-        const emptySlots = [{ date: todayStr, time: "10:00" }, { date: todayStr, time: "14:00" }];
+        const emptySlots = validDates
+            .filter((slot: any) => slot?.date && slot?.time)
+            .map((slot: any) => ({ date: slot.date, time: slot.time }));
+
+        if (emptySlots.length === 0) {
+            throw new Error("Taslak oluşturulamadı: geçerli slot bilgisi bulunamadı.");
+        }
+
         const { audience: baseAudience } = await getTimeSlotAffinityAudience(supabase, businessId, emptySlots);
         const result = await evaluateCampaignExclusions(baseAudience, alternative.service_id, businessId);
         audience = result.audience;
@@ -786,25 +809,56 @@ export async function createDraftFromAi(alternative: any) {
         throw new Error("Bu hizmet için hedeflenebilecek uygun müşteri bulunamadı.");
     }
 
+    const draftFingerprint = JSON.stringify({
+        concept_name: alternative.concept_name || "",
+        service_id: alternative.service_id || "",
+        offer_type: alternative.offer_type || "",
+        offer_value: alternative.offer_value || "",
+        message: alternative.message_templates?.[0]?.content || "",
+        valid_dates: validDates
+    });
+
+    let segment_id: string | null = null;
+    const { data: existingSegment } = await supabase
+        .from("campaign_segments")
+        .select("id")
+        .eq("business_id", businessId)
+        .contains("source_context", { draft_fingerprint: draftFingerprint })
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    if (existingSegment?.id) {
+        segment_id = existingSegment.id;
+    }
+
     // 3) Create Segment
     const internalAudience = audience.map((a: any) => ({ id: a.id, score: a.score || 0 }));
-    const segmentName = `AI Draft: ${alternative.concept_name || alternative.service_name || 'Hedef Kitle'}`;
-    const createSegResult = await createSegmentFromAudience("ai_generated", segmentName, { service: alternative.service_id }, internalAudience);
-    
-    if (!createSegResult.success || !createSegResult.segment_id) {
-        throw new Error("Segment oluşturulamadı: " + createSegResult.error);
+    if (!segment_id) {
+        const segmentName = `AI Draft: ${alternative.concept_name || alternative.service_name || 'Hedef Kitle'}`;
+        const createSegResult = await createSegmentFromAudience("ai_generated", segmentName, {
+            service: alternative.service_id,
+            draft_fingerprint: draftFingerprint,
+            valid_dates: validDates
+        }, internalAudience);
+
+        if (!createSegResult.success || !createSegResult.segment_id) {
+            throw new Error("Segment oluşturulamadı: " + createSegResult.error);
+        }
+
+        segment_id = createSegResult.segment_id;
     }
-    const segment_id = createSegResult.segment_id;
 
     // 4) Create Draft Campaign (gerçek DB şemasına uygun)
     const offerDetails: any = {
         service_id: alternative.service_id,
         service_name: alternative.service_name || "",
         offer_value: alternative.offer_value || "",
-        message: alternative.message_templates?.[0]?.content || ""
+        message: alternative.message_templates?.[0]?.content || "",
+        valid_dates: validDates
     };
 
-    const { data: draft, error: campErr } = await supabase.from('campaigns').insert({
+    const draftPayload = {
         business_id: businessId,
         name: alternative.concept_name || "AI Kampanyası",
         description: alternative.description || null,
@@ -814,8 +868,44 @@ export async function createDraftFromAi(alternative: any) {
         target_segment: segment_id,
         channel: ["whatsapp"],
         status: "draft",
-        send_status: "draft"
-    }).select('id').single();
+        send_status: "draft",
+        start_date: validDates[0]?.date || null,
+        end_date: validDates.length > 0 ? validDates[validDates.length - 1]?.date || null : null,
+        estimated_audience_count: audience.length
+    };
+
+    const { data: existingDraft } = await supabase
+        .from("campaigns")
+        .select("id")
+        .eq("business_id", businessId)
+        .eq("status", "draft")
+        .eq("name", draftPayload.name)
+        .eq("target_segment", segment_id)
+        .maybeSingle();
+
+    let draft = existingDraft;
+    let campErr: any = null;
+
+    if (existingDraft?.id) {
+        const result = await supabase
+            .from("campaigns")
+            .update(draftPayload)
+            .eq("id", existingDraft.id)
+            .select("id")
+            .single();
+
+        draft = result.data;
+        campErr = result.error;
+    } else {
+        const result = await supabase
+            .from("campaigns")
+            .insert(draftPayload)
+            .select("id")
+            .single();
+
+        draft = result.data;
+        campErr = result.error;
+    }
 
     if (campErr || !draft) throw new Error("Taslak oluşturulamadı: " + (campErr?.message || "Bilinmeyen hata"));
 
@@ -839,12 +929,40 @@ export interface AiCampaignFilters {
     min_total_spent?: number | null;
 }
 
+function normalizeFilterString(value: unknown): string | null {
+    if (typeof value !== "string") return null;
+    const normalized = value.toLocaleLowerCase("tr-TR").trim();
+    return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeFilterNumber(value: unknown): number | null {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string") {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+}
+
+function sanitizeAiCampaignFilters(filters: AiCampaignFilters | Record<string, unknown> | null | undefined): AiCampaignFilters {
+    return {
+        min_days_inactive: normalizeFilterNumber(filters?.min_days_inactive),
+        max_days_inactive: normalizeFilterNumber(filters?.max_days_inactive),
+        service_name_filter: normalizeFilterString(filters?.service_name_filter),
+        exclude_service_name: normalizeFilterString(filters?.exclude_service_name),
+        min_visits: normalizeFilterNumber(filters?.min_visits),
+        max_visits: normalizeFilterNumber(filters?.max_visits),
+        min_total_spent: normalizeFilterNumber(filters?.min_total_spent)
+    };
+}
+
 // ── ORTAK FİLTRE FONKSİYONU ──────────────────────────
 async function filterCustomersByAiCriteria(
     supabase: any,
     businessId: string,
     filters: AiCampaignFilters
 ): Promise<{ audience: { id: string; name: string; score: number; daysSince: number }[]; stats: { total: number; excluded_active_plan: number; excluded_future_appt: number; filtered_out: number } }> {
+    const safeFilters = sanitizeAiCampaignFilters(filters);
 
     // ═══ AYRI SORGULAR (nested join güvenilmez) ═══
 
@@ -928,10 +1046,10 @@ async function filterCustomersByAiCriteria(
     const today = new Date();
     const audience: { id: string; name: string; score: number; daysSince: number }[] = [];
     let exPlan = 0, exFuture = 0, exFilter = 0;
-    const svcFilter = filters.service_name_filter?.toLowerCase().trim() || null;
-    const excludeSvcFilter = filters.exclude_service_name?.toLowerCase().trim() || null;
+    const svcFilter = safeFilters.service_name_filter || null;
+    const excludeSvcFilter = safeFilters.exclude_service_name || null;
 
-    console.log(`[AI-Filter] Filtreler:`, JSON.stringify(filters));
+    console.log(`[AI-Filter] Filtreler:`, JSON.stringify(safeFilters));
     console.log(`[AI-Filter] Toplam müşteri: ${allCustomers.length}, randevu: ${(allAppointments||[]).length}, hizmet bağlantısı: ${totalServiceLinks}`);
 
     for (const c of allCustomers) {
@@ -939,14 +1057,14 @@ async function filterCustomersByAiCriteria(
         const done = appts.filter(a => a.status === "completed");
 
         // Hiç completed randevusu yok → sadece geçmiş veriye ihtiyaç duyan filtreler varsa atla
-        const needsVisitHistory = (filters.min_days_inactive != null && filters.min_days_inactive > 0) || 
-                                   filters.min_visits != null || 
-                                   filters.min_total_spent != null ||
+        const needsVisitHistory = (safeFilters.min_days_inactive != null && safeFilters.min_days_inactive > 0) || 
+                                   safeFilters.min_visits != null || 
+                                   safeFilters.min_total_spent != null ||
                                    !!svcFilter;
         if (done.length === 0 && needsVisitHistory) { exFilter++; continue; }
 
         // ── EXCLUSION: Aktif seans planı & gelecek randevu ──
-        const isTargetingInactive = filters.min_days_inactive != null && filters.min_days_inactive > 0;
+        const isTargetingInactive = safeFilters.min_days_inactive != null && safeFilters.min_days_inactive > 0;
         const isServiceSpecific = !!svcFilter || !!excludeSvcFilter;
         const shouldExcludeActive = isTargetingInactive || isServiceSpecific;
 
@@ -967,13 +1085,13 @@ async function filterCustomersByAiCriteria(
         }
 
         // ── min/max visits ──
-        if (filters.min_visits != null && done.length < filters.min_visits) { exFilter++; continue; }
-        if (filters.max_visits != null && done.length > filters.max_visits) { exFilter++; continue; }
+        if (safeFilters.min_visits != null && done.length < safeFilters.min_visits) { exFilter++; continue; }
+        if (safeFilters.max_visits != null && done.length > safeFilters.max_visits) { exFilter++; continue; }
 
         // ── min_total_spent ──
-        if (filters.min_total_spent != null) {
+        if (safeFilters.min_total_spent != null) {
             const spent = done.reduce((s, a) => s + a.price, 0);
-            if (spent < filters.min_total_spent) { exFilter++; continue; }
+            if (spent < safeFilters.min_total_spent) { exFilter++; continue; }
         }
 
         // ── Son ziyaret → kaç gün önceydi ──
@@ -982,8 +1100,8 @@ async function filterCustomersByAiCriteria(
             const sorted = [...done].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
             daysSince = Math.floor((today.getTime() - new Date(sorted[0].date).getTime()) / 86400000);
         }
-        if (filters.min_days_inactive != null && daysSince < filters.min_days_inactive) { exFilter++; continue; }
-        if (filters.max_days_inactive != null && daysSince > filters.max_days_inactive) { exFilter++; continue; }
+        if (safeFilters.min_days_inactive != null && daysSince < safeFilters.min_days_inactive) { exFilter++; continue; }
+        if (safeFilters.max_days_inactive != null && daysSince > safeFilters.max_days_inactive) { exFilter++; continue; }
 
         // ── service_name_filter: Bu hizmeti ALMIŞ olmalı ──
         if (svcFilter) {
@@ -1014,7 +1132,7 @@ export async function previewFilteredAudience(filters: AiCampaignFilters) {
     const { data: businessUser } = await supabase.from('business_users').select('business_id').eq('user_id', userResponse.user.id).single();
     if (!businessUser) return { success: false, count: 0, sample: [], stats: null };
 
-    const result = await filterCustomersByAiCriteria(supabase, businessUser.business_id, filters);
+    const result = await filterCustomersByAiCriteria(supabase, businessUser.business_id, sanitizeAiCampaignFilters(filters));
     return {
         success: true,
         count: result.audience.length,
@@ -1035,11 +1153,12 @@ export async function createFilteredCampaignDraft(
     if (!businessUser) throw new Error("İşletme yetkiniz bulunamadı.");
     const businessId = businessUser.business_id;
 
-    const { audience } = await filterCustomersByAiCriteria(supabase, businessId, filters);
+    const safeFilters = sanitizeAiCampaignFilters(filters);
+    const { audience } = await filterCustomersByAiCriteria(supabase, businessId, safeFilters);
     if (audience.length === 0) return { success: false, error: "Bu filtrelere uyan müşteri bulunamadı. AI'a farklı kriterler söylemeyi deneyin." } as any;
 
     const internalAudience = audience.map(a => ({ id: a.id, score: a.score }));
-    const segResult = await createSegmentFromAudience("ai_generated", `AI Chat: ${campaignInfo.concept_name}`, { filters: JSON.stringify(filters) }, internalAudience);
+    const segResult = await createSegmentFromAudience("ai_generated", `AI Chat: ${campaignInfo.concept_name}`, { filters: JSON.stringify(safeFilters) }, internalAudience);
     if (!segResult.success || !segResult.segment_id) throw new Error("Segment oluşturulamadı: " + segResult.error);
 
     const { data: draft, error: campErr } = await supabase.from('campaigns').insert({

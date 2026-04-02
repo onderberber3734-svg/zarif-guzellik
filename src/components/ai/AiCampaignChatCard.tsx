@@ -29,6 +29,85 @@ const ACTION_COLORS: Record<string, { bg: string; ring: string }> = {
     custom:    { bg: "from-slate-500 to-slate-700",     ring: "ring-slate-400" },
 };
 
+function normalizeIntentText(text: string) {
+    return text
+        .toLocaleLowerCase("tr-TR")
+        .replace(/[^\p{L}\p{N}\s]/gu, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function hasRecentCampaignContext(messages: AiChatMessage[] = [], goalType?: string | null) {
+    const recentContext = messages
+        .slice(-4)
+        .map((message) => normalizeIntentText(message.content))
+        .join(" ");
+
+    const contextKeywords = [
+        "kampanya",
+        "teklif",
+        "indirim",
+        "segment",
+        "hedef kitle",
+        "musterilere yaz",
+        "müşterilere yaz",
+        "slot",
+        "winback"
+    ];
+
+    if (contextKeywords.some((keyword) => recentContext.includes(normalizeIntentText(keyword)))) {
+        return true;
+    }
+
+    return ["loyalty", "new", "slots", "revenue"].includes(goalType || "");
+}
+
+function shouldShowCampaignSuggestion(message: string, goalType?: string | null, messages: AiChatMessage[] = []) {
+    const normalized = normalizeIntentText(message);
+    const explicitRequestMarkers = [
+        "kampanya oluştur",
+        "kampanya olustur",
+        "kampanya yap",
+        "kampanya hazırl",
+        "kampanya hazirla",
+        "teklif hazırla",
+        "teklif hazirla",
+        "mesaj hazırla",
+        "mesaj hazirla",
+        "indirim yap",
+        "segment oluştur",
+        "segment olustur",
+        "müşterilere yaz",
+        "musterilere yaz",
+        "duyuru yap",
+        "slot doldurmak için kampanya",
+        "boş slot için kampanya",
+        "bos slot için kampanya"
+    ];
+
+    if (explicitRequestMarkers.some((keyword) => normalized.includes(normalizeIntentText(keyword)))) {
+        return true;
+    }
+
+    const followUpActionWords = ["evet", "tamam", "olsun", "devam", "oluştur", "olustur", "hazırla", "hazirla", "yapalım", "yapalim", "yap"];
+    if (
+        followUpActionWords.some((word) => normalized.includes(normalizeIntentText(word))) &&
+        hasRecentCampaignContext(messages, goalType)
+    ) {
+        return true;
+    }
+
+    if (!goalType) return false;
+
+    const campaignNouns = ["kampanya", "teklif", "indirim", "segment", "mesaj", "duyuru"];
+    const actionVerbs = ["oluştur", "olustur", "hazırla", "hazirla", "yap", "yapalım", "yapalim"];
+
+    return (
+        campaignNouns.some((word) => normalized.includes(normalizeIntentText(word))) &&
+        actionVerbs.some((word) => normalized.includes(normalizeIntentText(word)))
+    );
+}
+
 export function AiCampaignChatCard() {
     const [messages, setMessages] = useState<AiChatMessage[]>([]);
     const [input, setInput] = useState("");
@@ -86,6 +165,7 @@ export function AiCampaignChatCard() {
     const sendMessage = async (text?: string) => {
         const msg = (text || input).trim();
         if (!msg || isLoading) return;
+        const wantsCampaignCard = shouldShowCampaignSuggestion(msg, selectedGoal, messages);
 
         const userMsg: AiChatMessage = { role: "user", content: msg };
         setMessages(prev => [...prev, userMsg]);
@@ -98,7 +178,7 @@ export function AiCampaignChatCard() {
         if (response.success) {
             const assistantMsg: AiChatMessage = { role: "assistant", content: response.reply || "" };
             setMessages(prev => [...prev, assistantMsg]);
-            if (response.suggestion) {
+            if (response.suggestion && wantsCampaignCard) {
                 setLatestSuggestion(response.suggestion);
                 setRealPreview(null); // önceki preview'ı sıfırla, yeni sorgu çalışacak
                 // AI filtreleriyle GERÇEK DB sorgusu çalıştır → gerçek kişi sayısı göster
@@ -116,6 +196,9 @@ export function AiCampaignChatCard() {
                             setRealPreview({ count: 0, sample: [] });
                         });
                 }
+            } else {
+                setLatestSuggestion(null);
+                setRealPreview(null);
             }
         } else {
             // Hata olsa bile sohbete bir mesaj ekle, konuşma akışını bozma
@@ -124,6 +207,8 @@ export function AiCampaignChatCard() {
                 content: response.error || "Bir anlık teknik sorun yaşadım. Sorunuzu tekrar yazarsanız hemen yanıtlayacağım. 🤖" 
             };
             setMessages(prev => [...prev, fallbackMsg]);
+            setLatestSuggestion(null);
+            setRealPreview(null);
         }
 
         setIsLoading(false);

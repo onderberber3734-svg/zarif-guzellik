@@ -10,24 +10,26 @@ export const isVIPCustomer = (customer: any): boolean => {
 };
 
 export const isNewCustomer = (customer: any): boolean => {
-    // Yeni Müşteriler = son 30 günde eklenen VE henüz 1 veya daha az randevusu olan müşteriler
-    if (!customer.created_at) return false;
-    const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
-    const createdMs = new Date(customer.created_at).getTime();
-    const isRecent = (Date.now() - createdMs) <= thirtyDaysMs;
+    // Yeni Müşteriler = ilk ziyaretini yakın zamanda yapmış ve henüz derin geçmiş oluşturmamış müşteriler
     const totalAppts = customer.stats?.totalAppointments || 0;
-    return isRecent && totalAppts <= 1;
+    const firstVisitDate = customer.stats?.firstVisitDate;
+    if (!firstVisitDate || totalAppts > 1) return false;
+
+    const firstVisitMs = new Date(firstVisitDate).getTime();
+    if (Number.isNaN(firstVisitMs)) return false;
+
+    const fortyFiveDaysMs = 45 * 24 * 60 * 60 * 1000;
+    return (Date.now() - firstVisitMs) <= fortyFiveDaysMs;
 };
 
 export const isRiskGroup = (customer: any): boolean => {
-    // Riskli Grup = 90+ gündür completed randevusu olmayanlar
-    if (customer.stats && customer.stats.daysSinceLastVisit !== null && customer.stats.daysSinceLastVisit > 90) {
-        return true;
-    }
-    if (customer.stats && customer.stats.totalAppointments > 0 && !customer.stats.lastVisitDate) {
-        return true;
-    }
-    return false;
+    // Riskli Grup = geçmişte gelmiş ama son ziyaretinin üzerinden 90+ gün geçmiş müşteriler
+    return Boolean(
+        customer.stats &&
+        customer.stats.totalAppointments > 0 &&
+        customer.stats.daysSinceLastVisit !== null &&
+        customer.stats.daysSinceLastVisit > 90
+    );
 };
 
 export const isBirthdayApproaching = (customer: any): boolean => {

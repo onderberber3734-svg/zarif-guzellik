@@ -16,6 +16,7 @@ export function Sidebar() {
         { label: "Salonlar", icon: "meeting_room", href: "/salonlar" },
         { label: "Finans", icon: "payments", href: "/finans" },
         { label: "Kampanyalar", icon: "campaign", href: "/kampanyalar" },
+        { label: "WhatsApp", icon: "chat", href: "/whatsapp", special: true },
         { label: "AI Asistan", icon: "auto_awesome", href: "/ai-asistan", special: true },
     ];
 

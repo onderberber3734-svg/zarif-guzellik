@@ -672,6 +672,44 @@ export async function reassignSingleAppointment(appointmentId: string, newStaffI
     const { data: biz } = await supabase.from("business_users").select("business_id").eq("user_id", user.id).single();
     if (!biz) return { success: false, error: "No business" };
 
+    const { data: appointment, error: appointmentError } = await supabase
+        .from("appointments")
+        .select(`
+            id,
+            appointment_date,
+            appointment_time,
+            total_duration_minutes,
+            appointment_services (service_id)
+        `)
+        .eq("id", appointmentId)
+        .eq("business_id", biz.business_id)
+        .single();
+
+    if (appointmentError || !appointment) {
+        return { success: false, error: "Randevu bulunamadı." };
+    }
+
+    const serviceIds = (appointment.appointment_services || []).map((item: any) => item.service_id).filter(Boolean);
+    const eligibility = await getEligibleStaffForService({
+        serviceIds,
+        appointmentDate: appointment.appointment_date,
+        appointmentTime: appointment.appointment_time,
+        totalDurationMinutes: appointment.total_duration_minutes || 0
+    });
+
+    if (!eligibility.success) {
+        return { success: false, error: eligibility.error || "Personel uygunluğu doğrulanamadı." };
+    }
+
+    const selectedStaff = (eligibility.data || []).find((staff: any) => staff.id === newStaffId);
+    if (!selectedStaff) {
+        return { success: false, error: "Seçilen personel bulunamadı." };
+    }
+
+    if (!selectedStaff.isEligible) {
+        return { success: false, error: selectedStaff.ineligibleReason || "Seçilen personel bu randevu için uygun değil." };
+    }
+
     const { error } = await supabase
         .from("appointments")
         .update({ staff_id: newStaffId })

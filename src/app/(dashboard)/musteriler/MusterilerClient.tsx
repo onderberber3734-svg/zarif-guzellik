@@ -219,10 +219,10 @@ export default function MusterilerClient({ initialCustomers }: { initialCustomer
                 <div className="group relative flex flex-col p-5 bg-white border border-slate-200 rounded-3xl shadow-sm hover:border-emerald-500 hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer" onClick={() => setSegmentFilter(SEGMENT_NAMES.NEW)}>
                     <div className="flex items-center gap-2 mb-3 text-emerald-600">
                         <span className="inline-flex px-2 py-0.5 bg-emerald-100 rounded text-[10px] font-bold uppercase tracking-wider">YENİ</span>
-                        <span className="text-xs font-bold uppercase tracking-widest">YENİ MÜŞTERİLER (30 GÜN)</span>
+                        <span className="text-xs font-bold uppercase tracking-widest">İLK ZİYARETİ YENİ OLANLAR</span>
                     </div>
                     <span className="text-4xl font-extrabold text-slate-900">{newCount}</span>
-                    <span className="text-xs text-slate-500 mt-1 font-medium">Son 30 günde eklenen kayıtlar</span>
+                    <span className="text-xs text-slate-500 mt-1 font-medium">İlk completed ziyareti yakın olan müşteriler</span>
                 </div>
 
                 {/* Riskli Grup Kartı */}

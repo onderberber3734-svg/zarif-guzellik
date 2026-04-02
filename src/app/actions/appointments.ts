@@ -3,6 +3,8 @@
 import { createClient } from "@/utils/supabase/server";
 import { revalidatePath } from "next/cache";
 
+const ACTIVE_APPOINTMENT_STATUSES = ["scheduled", "checked_in", "in_progress"];
+
 export async function createAppointment(appointmentData: {
     customer_id: string;
     salon_id?: string;
@@ -37,11 +39,110 @@ export async function createAppointment(appointmentData: {
         return { success: false, error: "Kullanıcıya tanımlı bir işletme (tenant) bulunamadı." };
     }
 
+    const businessId = businessUser.business_id;
+    const serviceIds = appointmentData.services.map((service) => service.service_id);
+    const sessionPlanIds = appointmentData.services
+        .map((service) => service.session_plan_id)
+        .filter(Boolean) as string[];
+
+    const { data: customer } = await supabase
+        .from("customers")
+        .select("id")
+        .eq("id", appointmentData.customer_id)
+        .eq("business_id", businessId)
+        .maybeSingle();
+
+    if (!customer) {
+        return { success: false, error: "Seçilen müşteri bu işletmeye ait değil." };
+    }
+
+    const { data: services } = await supabase
+        .from("services")
+        .select("id, salon_services(salon_id)")
+        .eq("business_id", businessId)
+        .in("id", serviceIds);
+
+    if (!services || services.length !== serviceIds.length) {
+        return { success: false, error: "Randevudaki hizmetlerden biri bu işletmeye ait değil veya pasif." };
+    }
+
+    if (sessionPlanIds.length > 0) {
+        const { data: sessionPlans } = await supabase
+            .from("session_plans")
+            .select("id, customer_id, service_id, status, total_sessions, completed_sessions")
+            .eq("business_id", businessId)
+            .in("id", sessionPlanIds);
+
+        if (!sessionPlans || sessionPlans.length !== sessionPlanIds.length) {
+            return { success: false, error: "Seçilen seans planlarından biri bulunamadı." };
+        }
+
+        const plansById = new Map(sessionPlans.map((plan: any) => [plan.id, plan]));
+        for (const service of appointmentData.services) {
+            if (!service.session_plan_id) continue;
+
+            const plan = plansById.get(service.session_plan_id);
+            if (!plan) {
+                return { success: false, error: "Seans planı doğrulanamadı." };
+            }
+
+            if (plan.status !== "active") {
+                return { success: false, error: "İptal edilmiş veya tamamlanmış bir paket için randevu planlanamaz." };
+            }
+
+            if (plan.customer_id !== appointmentData.customer_id || plan.service_id !== service.service_id) {
+                return { success: false, error: "Seans planı müşteri veya hizmet ile eşleşmiyor." };
+            }
+
+            if (service.session_number && (service.session_number <= plan.completed_sessions || service.session_number > plan.total_sessions)) {
+                return { success: false, error: "Seans numarası planın mevcut ilerlemesiyle uyumlu değil." };
+            }
+        }
+    }
+
+    if (appointmentData.salon_id) {
+        const { data: salon } = await supabase
+            .from("salons")
+            .select("id, is_active, salon_services(service_id)")
+            .eq("id", appointmentData.salon_id)
+            .eq("business_id", businessId)
+            .maybeSingle();
+
+        if (!salon?.is_active) {
+            return { success: false, error: "Seçilen salon aktif değil veya bu işletmeye ait değil." };
+        }
+
+        const salonServiceIds = new Set((salon.salon_services || []).map((item: any) => item.service_id));
+        const supportsAllServices = serviceIds.every((serviceId) => salonServiceIds.has(serviceId));
+        if (!supportsAllServices) {
+            return { success: false, error: "Seçilen salon randevudaki tüm hizmetleri desteklemiyor." };
+        }
+
+        const { data: salonAppointments } = await supabase
+            .from("appointments")
+            .select("appointment_time, total_duration_minutes")
+            .eq("salon_id", appointmentData.salon_id)
+            .eq("appointment_date", appointmentData.appointment_date)
+            .in("status", ACTIVE_APPOINTMENT_STATUSES);
+
+        const requestedStart = new Date(`${appointmentData.appointment_date}T${appointmentData.appointment_time}`).getTime();
+        const requestedEnd = requestedStart + (appointmentData.total_duration_minutes * 60000);
+        const salonHasConflict = (salonAppointments || []).some((appointment: any) => {
+            const appointmentStart = new Date(`${appointmentData.appointment_date}T${appointment.appointment_time}`).getTime();
+            const appointmentEnd = appointmentStart + ((appointment.total_duration_minutes || 0) * 60000);
+            return requestedStart < appointmentEnd && requestedEnd > appointmentStart;
+        });
+
+        if (salonHasConflict) {
+            return { success: false, error: "Seçilen salon bu saat aralığında dolu." };
+        }
+    }
+
     // 1.5. Personel Zorunluluğu ve Doğrulama
     const { data: activeStaff } = await supabase
         .from("staff")
         .select(`id, is_active, staff_services(service_id)`)
-        .eq("business_id", businessUser.business_id)
+        .eq("business_id", businessId)
         .eq("is_active", true);
 
     const hasAnyActiveStaff = activeStaff && activeStaff.length > 0;
@@ -65,7 +166,6 @@ export async function createAppointment(appointmentData: {
             }
 
             // A) Hizmet kontrolü
-            const serviceIds = appointmentData.services.map(s => s.service_id);
             const staffSkills = new Set(targetStaff.staff_services?.map(ss => ss.service_id) || []);
             const hasSkill = serviceIds.every(sid => staffSkills.has(sid));
             if (!hasSkill) {
@@ -90,7 +190,7 @@ export async function createAppointment(appointmentData: {
                 .select("appointment_time, total_duration_minutes")
                 .eq("staff_id", finalStaffId)
                 .eq("appointment_date", appointmentData.appointment_date)
-                .in("status", ["scheduled", "checked_in", "in_progress"]);
+                .in("status", ACTIVE_APPOINTMENT_STATUSES);
 
             const reqStart = new Date(`${appointmentData.appointment_date}T${appointmentData.appointment_time}`).getTime();
             const reqEnd = reqStart + (appointmentData.total_duration_minutes * 60000);
@@ -156,7 +256,7 @@ export async function createAppointment(appointmentData: {
         .from("appointments")
         .insert([
             {
-                business_id: businessUser.business_id,
+                business_id: businessId,
                 customer_id: appointmentData.customer_id,
                 salon_id: appointmentData.salon_id || null,
                 staff_id: finalStaffId,
@@ -274,6 +374,25 @@ export async function createSessionPlan(planData: {
 
     const { data: biz } = await supabase.from("business_users").select("business_id").eq("user_id", user.id).single();
     if (!biz) return { success: false, error: "No business" };
+    const businessId = biz.business_id;
+
+    const [{ data: customer }, { data: service }] = await Promise.all([
+        supabase
+            .from("customers")
+            .select("id")
+            .eq("id", planData.customer_id)
+            .eq("business_id", businessId)
+            .maybeSingle(),
+        supabase
+            .from("services")
+            .select("id")
+            .eq("id", planData.service_id)
+            .eq("business_id", businessId)
+            .maybeSingle()
+    ]);
+
+    if (!customer) return { success: false, error: "Müşteri bu işletmeye ait değil." };
+    if (!service) return { success: false, error: "Hizmet bu işletmeye ait değil." };
 
     const prepayment = planData.prepayment_amount || 0;
 
@@ -288,7 +407,7 @@ export async function createSessionPlan(planData: {
     const { data, error } = await supabase
         .from("session_plans")
         .insert([{
-            business_id: biz.business_id,
+            business_id: businessId,
             customer_id: planData.customer_id,
             service_id: planData.service_id,
             total_sessions: planData.total_sessions,
@@ -309,7 +428,7 @@ export async function createSessionPlan(planData: {
     // Eğer bir ön ödeme yapıldıysa ödemeler tablosuna kayıt at
     if (prepayment > 0 && data) {
         await supabase.from("payments").insert([{
-            business_id: biz.business_id,
+            business_id: businessId,
             customer_id: planData.customer_id,
             session_plan_id: data.id,
             amount: prepayment,

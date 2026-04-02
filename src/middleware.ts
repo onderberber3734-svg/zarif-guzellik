@@ -8,7 +8,7 @@ export async function middleware(request: NextRequest) {
     // Yönlendirme mantığı:
     // Eğer kullanıcı giriş yapmamışsa ve auth dışı bir sayfadaysa /login'e yönlendir
     const isAuthRoute = request.nextUrl.pathname.startsWith('/login') || request.nextUrl.pathname.startsWith('/register');
-    const isPublicRoute = request.nextUrl.pathname.startsWith('/api/') || request.nextUrl.pathname.startsWith('/_next/') || request.nextUrl.pathname === '/favicon.ico' || request.nextUrl.pathname.startsWith('/public/');
+    const isPublicRoute = request.nextUrl.pathname.startsWith('/api/') || request.nextUrl.pathname.startsWith('/_next/') || request.nextUrl.pathname === '/favicon.ico' || request.nextUrl.pathname.startsWith('/public/') || request.nextUrl.pathname.startsWith('/api/whatsapp/');
 
     if (!isPublicRoute) {
         if (!user && !isAuthRoute) {
@@ -38,6 +38,6 @@ export const config = {
          * - favicon.ico (favicon file)
          * Feel free to modify this pattern to include more paths.
          */
-        '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+        '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|webm|mp4|mov|woff|woff2|ico)$).*)',
     ],
 };

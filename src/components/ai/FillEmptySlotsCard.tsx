@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 "use client";
 
 import { useState, useEffect } from "react";
@@ -183,14 +185,10 @@ export function FillEmptySlotsCard({ initialInsight, isStale }: FillEmptySlotsCa
                                                         setIsCreatingSegment(true);
                                                         setError("");
                                                         const res = await createDraftFromAi(alt);
-                                                        const params = new URLSearchParams();
-                                                        if (res.segment_id) params.set('segment_id', res.segment_id);
-                                                        if (alt.service_name) params.set('service_name', alt.service_name);
-                                                        if (alt.offer_type) params.set('offer_type', alt.offer_type);
-                                                        if (alt.offer_value) params.set('offer_value', String(alt.offer_value));
-                                                        if (alt.concept_name) params.set('concept_name', alt.concept_name);
-                                                        if (alt.message_templates?.[0]?.content) params.set('message', alt.message_templates[0].content);
-                                                        router.push(`/kampanyalar?${params.toString()}`);
+                                                        if (!res.draft_id) {
+                                                            throw new Error("Taslak kampanya açılamadı.");
+                                                        }
+                                                        router.push(`/kampanyalar?draft_id=${res.draft_id}`);
                                                     } catch (err: any) {
                                                         setError(err.message || "Bir hata oluştu");
                                                     } finally {

@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { callOpenRouter, ProviderError } from "./providers/openrouter";
 
 // Dışa aktar, AI fallback yakalamalarında kullanılabilsin

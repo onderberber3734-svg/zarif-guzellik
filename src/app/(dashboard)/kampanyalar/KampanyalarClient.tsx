@@ -3,9 +3,10 @@
 import { useState, useEffect } from "react";
 import { createCampaign, updateCampaignStatus, previewCampaignTargets, deleteCampaign, updateCampaignDetails, getConvertedTargets } from "@/app/actions/campaigns";
 import { refreshAiInsight } from "@/app/actions/ai";
+import { sendCampaignViaWhatsApp } from "@/app/actions/whatsapp";
 import CustomerLink from "@/components/CustomerLink";
 
-export default function KampanyalarClient({ initialCampaigns, initialSegment, initialParams }: { initialCampaigns: any[], initialSegment?: any, initialParams?: any }) {
+export default function KampanyalarClient({ initialCampaigns, initialSegment, initialParams, initialDraft }: { initialCampaigns: any[], initialSegment?: any, initialParams?: any, initialDraft?: any }) {
     const [campaigns, setCampaigns] = useState(initialCampaigns);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
@@ -27,6 +28,7 @@ export default function KampanyalarClient({ initialCampaigns, initialSegment, in
     const [isAudienceModalOpen, setIsAudienceModalOpen] = useState(false);
     const [audienceModalData, setAudienceModalData] = useState<any[]>([]);
     const [isAudienceLoading, setIsAudienceLoading] = useState(false);
+    const [sendingCampaignId, setSendingCampaignId] = useState<string | null>(null);
     const [audienceModalCampaign, setAudienceModalCampaign] = useState<any>(null);
     const [audiencePage, setAudiencePage] = useState(1);
     const AUDIENCE_PER_PAGE = 7; // Sayfa başına 7 kişi gösterilecek
@@ -61,6 +63,37 @@ export default function KampanyalarClient({ initialCampaigns, initialSegment, in
     };
 
     useEffect(() => {
+        if (initialDraft) {
+            const offerDetails = initialDraft.offer_details || {};
+            setFormData(prev => ({
+                ...prev,
+                name: initialDraft.name || "",
+                description: initialDraft.description || "",
+                type: initialDraft.type || "custom",
+                target_segment: initialDraft.target_segment || "risk",
+                offer_type: initialDraft.offer_type || prev.offer_type,
+                offer_condition: offerDetails.service_name || prev.offer_condition,
+                offer_value: offerDetails.offer_value ? String(offerDetails.offer_value) : prev.offer_value,
+                offer_details: initialDraft.offer_details || "",
+                start_date: initialDraft.start_date ? String(initialDraft.start_date).split("T")[0] : prev.start_date,
+                end_date: initialDraft.end_date ? String(initialDraft.end_date).split("T")[0] : "",
+                estimated_conversion_count: initialDraft.estimated_conversion_count || 0,
+                expected_revenue_impact: initialDraft.expected_revenue_impact || 0,
+                channel: Array.isArray(initialDraft.channel) && initialDraft.channel.length > 0 ? initialDraft.channel : ["whatsapp"],
+                message_content: offerDetails.message || ""
+            }));
+            setEditingCampaignId(initialDraft.id);
+            setIsModalOpen(true);
+            setCurrentStep(1);
+
+            if (initialDraft.target_segment) {
+                previewCampaignTargets(initialDraft.target_segment)
+                    .then(res => setPreviewData(res))
+                    .catch(err => console.error("Taslak kitle önizlemesi yüklenemedi:", err));
+            }
+            return;
+        }
+
         const hasParams = initialParams && Object.keys(initialParams).length > 0;
         if (initialSegment || hasParams) {
             const targetSeg = initialSegment?.id || initialParams?.segment_id || "risk";
@@ -80,7 +113,6 @@ export default function KampanyalarClient({ initialCampaigns, initialSegment, in
                     sample: initialSegment.sample
                 });
             } else if (targetSeg) {
-                // initialSegment yoksa (built-in key geldi), preview'ı otomatik yükle
                 previewCampaignTargets(targetSeg)
                     .then(res => setPreviewData(res))
                     .catch(err => console.error("Preview yüklenemedi:", err));
@@ -88,7 +120,7 @@ export default function KampanyalarClient({ initialCampaigns, initialSegment, in
             setIsModalOpen(true);
             setCurrentStep(1);
         }
-    }, [initialSegment, initialParams]);
+    }, [initialDraft, initialSegment, initialParams]);
 
     const handleNextStep = async () => {
         if (currentStep === 1) {
@@ -207,6 +239,24 @@ export default function KampanyalarClient({ initialCampaigns, initialSegment, in
             console.error("Rapor alınamadı", err);
         } finally {
             setIsReportLoading(false);
+        }
+    };
+
+    const handleWhatsAppSend = async (campaignId: string) => {
+        if (!confirm("Bu kampanyayı WhatsApp üzerinden tüm hedef kitlenize göndermek istediğinize emin misiniz?")) return;
+        setSendingCampaignId(campaignId);
+        try {
+            const res = await sendCampaignViaWhatsApp(campaignId);
+            if (res.success && res.result) {
+                alert(`WhatsApp gönderimi tamamlandı!\n✅ Gönderildi: ${res.result.sent}\n❌ Başarısız: ${res.result.failed}`);
+                setCampaigns(campaigns.map(c => c.id === campaignId ? { ...c, status: 'active', send_status: res.result!.failed === 0 ? 'sent' : 'partially_sent' } : c));
+            } else {
+                alert("Hata: " + (res.error || "Gönderim başarısız."));
+            }
+        } catch (err: any) {
+            alert("Gönderim hatası: " + err.message);
+        } finally {
+            setSendingCampaignId(null);
         }
     };
 
@@ -471,6 +521,27 @@ export default function KampanyalarClient({ initialCampaigns, initialSegment, in
                                             <span className="text-[14px] font-black text-emerald-600">₺{Number(camp.actual_revenue_impact || 0).toLocaleString('tr-TR')}</span>
                                         </div>
                                     </div>
+
+                                    {/* WhatsApp Gönderim Butonu */}
+                                    {camp.status === 'draft' && Array.isArray(camp.channel) && camp.channel.includes('whatsapp') && (
+                                        <button
+                                            onClick={() => handleWhatsAppSend(camp.id)}
+                                            disabled={sendingCampaignId === camp.id}
+                                            className="mt-2 w-full py-2.5 bg-green-500 text-white rounded-xl text-xs font-bold hover:bg-green-600 transition-all flex items-center justify-center gap-2 shadow-sm shadow-green-200 disabled:opacity-50"
+                                        >
+                                            {sendingCampaignId === camp.id ? (
+                                                <>
+                                                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                                    Gönderiliyor...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <span className="material-symbols-outlined text-[16px]">send</span>
+                                                    WhatsApp ile Gönder
+                                                </>
+                                            )}
+                                        </button>
+                                    )}
 
                                     {(camp.actual_conversion_count > 0 || camp.status === 'completed') && (
                                         <button onClick={() => handleOpenReport(camp)} className="mt-2 w-full py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors flex items-center justify-center gap-2">
